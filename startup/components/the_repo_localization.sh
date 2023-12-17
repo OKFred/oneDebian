@@ -46,13 +46,13 @@ the_repo_localization() {
 
 the_sources_backup() {
   sources_list="/etc/apt/sources.list"
-  backup_file="/etc/apt/sources.list.bak"
+  backup_file="$sources_list.bak"
 
   if [ ! -f "$backup_file" ]; then
-    mv /etc/apt/sources.list /etc/apt/sources.list.bak
+    mv $sources_list $backup_file
     echo "已备份原有sources.list -> sources.list.bak"
   else
-    echo "sources.list 文件已存在，跳过重复备份"
+    echo "备份文件已存在，跳过"
   fi
 }
 
