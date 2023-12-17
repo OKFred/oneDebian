@@ -183,6 +183,17 @@ auth:
 	}
 	#处理OPTIONS 请求
  }"
+
+    echo "同时，/etc/nginx/nginx.conf最好也调整下，否则在上传到仓库时可能会出现413错误："
+    echo "http {
+#...
+client_max_body_size 1024M;
+client_header_buffer_size 16k;
+
+#指令参数2为个数，16k为大小，默认是8k。申请2个16k。
+large_client_header_buffers 2 16k;
+}"
+
     docker-compose up -d
     rm -rf ./docker-compose.yaml
   fi
