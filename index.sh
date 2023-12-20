@@ -19,7 +19,7 @@ main() {
   the_repo_localization
 
   echo "# 🚩  ②安装基础工具："
-  apt install -y nano net-tools htop
+  apt install -y nano net-tools htop wget
 
   echo "# 🚩  ③安装nvm、nodeJS 、npm等"
   the_node_installation
