@@ -30,30 +30,30 @@ menu_back() {
 main() {
   while (true); do
     menu_title
-    echo "00. 更换国内源"
-    echo "01. 安装基础工具nano、wget、git等"
-    echo "02. 配置SSH"
-    echo "03. 安装nvm、nodeJS 、npm等"
-    echo "04. 安装cockpit--方便运维"
-    echo "05. 安装docker、dockerd、portainer等"
-    echo "06. 部署项目"
-    echo "07. 更多"
-    echo "08. 关于"
-    echo "09. 退出"
+    echo "01. 更换国内源"
+    echo "02. 安装基础工具nano、wget、git等"
+    echo "03. 配置SSH"
+    echo "04. 安装nvm、nodeJS 、npm等"
+    echo "05. 安装cockpit--方便运维"
+    echo "06. 安装docker、dockerd、portainer等"
+    echo "07. 部署项目"
+    echo "08. 更多"
+    echo "09. 关于"
+    echo "00. 退出"
     echo
     echo -n "请输入你的选择："
     read the_user_choice
     case "$the_user_choice" in
-    00 | 0) the_repo_localization ;;
-    01 | 1) the_basic_setup ;;
-    02 | 2) the_ssh_configuration ;;
-    03 | 3) the_node_installation ;;
-    04 | 4) the_cockpit_installation ;;
-    05 | 5) the_docker_installation ;;
-    06 | 6) the_deployment ;;
-    07 | 7) echo '敬请期待' ;;
-    08 | 8) nano readme.md ;;
-    09 | 9) exit 1 ;;
+    01 | 1) the_repo_localization ;;
+    02 | 2) the_basic_setup ;;
+    03 | 3) the_ssh_configuration ;;
+    04 | 4) the_node_installation ;;
+    05 | 5) the_cockpit_installation ;;
+    06 | 6) the_docker_installation ;;
+    07 | 7) the_deployment ;;
+    08 | 8) echo '敬请期待' ;;
+    09 | 9) nano readme.md ;;
+    00 | 0) exit 1 ;;
     u) echo "???" ;;
     *) echo "输入有误，请重新输入！" && menu_back ;;
     esac

@@ -25,6 +25,10 @@ the_deployment_direct() {
     else
       echo "🚩正在启动项目..."
       the_entrypoint_initialization
+      if [ $? -ne 0 ]; then
+        echo "❌启动失败！"
+        return 1
+      fi
       the_service_registration
       echo "✅启动完成！"
     fi
