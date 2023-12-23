@@ -66,7 +66,15 @@ the_key_init() {
     ssh-keygen -t rsa -P "" -f ~$ssh_private_key
     echo "密钥已生成"
   else
-    echo "密钥已存在，跳过"
+    echo -e "\033[33m 🚀密钥已存在，是否覆盖？(y/n)"
+    read need_key_cover
+    echo -e "\033[0m"
+    if [ "$need_key_cover" != "y" ]; then
+      echo "跳过..."
+    else
+      ssh-keygen -t rsa -P "" -f ~$ssh_private_key
+      echo "密钥已生成"
+    fi
   fi
   if [ -f $ssh_pub_key ]; then
     check_permission
