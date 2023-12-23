@@ -50,9 +50,9 @@ main() {
     03 | 3) the_node_installation ;;
     04 | 4) the_cockpit_installation ;;
     05 | 5) the_docker_installation ;;
-    06 | 6) the_project_deployment ;;
+    06 | 6) the_deployment ;;
     07 | 7) echo '敬请期待' ;;
-    08 | 8) cat readme.md ;;
+    08 | 8) nano readme.md ;;
     09 | 9) exit 1 ;;
     u) echo "???" ;;
     *) echo "输入有误，请重新输入！" && menu_back ;;
