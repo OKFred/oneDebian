@@ -49,7 +49,7 @@ the_root_login() {
     else
       read -p "通过密码登录？(y/n)" need_password_login
       if [ "$need_password_login" == "y" ]; then
-        sed -i 's/#PermitRootLogin prohibit-password/#PermitRootLogin yes/g' $sshd_file
+        sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' $sshd_file
       fi
     fi
     grep "PermitRootLogin" $sshd_file
