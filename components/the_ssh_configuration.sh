@@ -42,21 +42,17 @@ the_root_login() {
     echo "跳过..."
   else
     cp $original_sshd_file $sshd_file
-    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' $sshd_file
-    echo "已允许root用户远程登录"
-    echo $(grep "PermitRootLogin" $sshd_file)
-    read -p "允许密码登录？(y/n)" need_password_login
     read -p "允许密钥登录？(y/n)" need_key_login
-    if [ "$need_password_login" == "y" ]; then
-      sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' $sshd_file
-      sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/g' $sshd_file
-    elif [ "$need_key_login" == "y" ]; then
-      sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' $sshd_file
+    read -p "允许密码登录？(y/n)" need_password_login
+    if [ "$need_key_login" == "y" ]; then
+      sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/g' $sshd_file
       the_key_init
+    elif [ "$need_password_login" == "y" ]; then
+      sed -i 's/#PermitRootLogin prohibit-password/#PermitRootLogin yes/g' $sshd_file
     else
       echo "跳过..."
     fi
-    grep "PasswordAuthentication" $sshd_file
+    grep "PermitRootLogin" $sshd_file
   fi
 }
 
