@@ -12,7 +12,7 @@ the_docker_installation() {
   echo -e "\033[0m"
   if [ "$need_docker" != "y" ]; then
     echo "已跳过 docker 的安装"
-    apt remove docker docker-compose -y
+    # apt remove docker docker-compose -y
   else
     echo "🚩正在安装 docker..."
     if which docker &>/dev/null; then
@@ -52,10 +52,10 @@ the_registry_installation() {
   echo -e "\033[0m"
   if [ "$need_registry" != "y" ]; then
     echo "已跳过 registry 的安装"
-    docker rm -f $(docker ps | grep registry-ui | awk '{print $1}')
-    docker rm -f $(docker ps | grep registry | awk '{print $1}')
+    # docker rm -f $(docker ps | grep registry-ui | awk '{print $1}')
+    # docker rm -f $(docker ps | grep registry | awk '{print $1}')
   else
-    echo -e "\033[33m🚀仓库地址？（需要配合nginx使用）"
+    echo -e "\033[33m🚀仓库地址？（http开头。最好配合nginx使用）"
     read registry_url
     echo -e "\033[0m"
     if [ -z "$registry_url" ]; then

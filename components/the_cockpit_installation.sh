@@ -9,9 +9,10 @@
 the_cockpit_installation() {
   echo -e "\033[33m 🚀cockpit--是否需要cockpit？(y/n)"
   read need_cockpit
+  echo -e "\033[0m"
   if [ "$need_cockpit" != "y" ]; then
     echo "不需要cockpit，跳过..."
-    apt remove cockpit -y
+    # apt remove cockpit -y
   else
     apt install -y cockpit
     mv /etc/cockpit/disallowed-users /etc/cockpit/disallowed-users.bak

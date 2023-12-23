@@ -12,7 +12,7 @@ the_node_installation() {
   echo -e "\033[0m"
   if [ "$needNode" != "y" ]; then
     echo "跳过 Node.js 的安装"
-    rm -rf ~/.nvm
+    # rm -rf ~/.nvm
   else
     echo "🚩尝试安装nodejs..."
     if apt search nodejs | grep ^nodejs/stable &>/dev/null; then
