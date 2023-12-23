@@ -7,8 +7,8 @@
 #none
 sshd_file=/etc/ssh/sshd_config
 original_sshd_file=/etc/ssh/sshd_config.bak
-ssh_pub_key=/root/.ssh/id_rsa.pub
-ssh_private_key=/root/.ssh/id_rsa
+ssh_pub_key=$HOME/.ssh/id_rsa.pub
+ssh_private_key=$HOME/.ssh/id_rsa
 
 the_ssh_configuration() {
   the_config_backup
@@ -60,11 +60,10 @@ the_key_init() {
   echo -e "\033[33m 🚀SSH--是否需要初始化密钥？(y/n)"
   read need_key_init
   echo -e "\033[0m"
-  check_if_folder_exist
   if [ "$need_key_init" != "y" ]; then
     echo "跳过..."
   elif [ ! -f $ssh_pub_key ]; then
-    ssh-keygen -t rsa -P "" -f ~$ssh_private_key
+    ssh-keygen -t rsa -P "" -f $ssh_private_key
     echo "密钥已生成"
   else
     echo -e "\033[33m 🚀密钥已存在，是否覆盖？(y/n)"
@@ -73,7 +72,7 @@ the_key_init() {
     if [ "$need_key_cover" != "y" ]; then
       echo "跳过..."
     else
-      ssh-keygen -t rsa -P "" -f ~$ssh_private_key
+      ssh-keygen -t rsa -P "" -f $ssh_private_key
       echo "密钥已生成"
     fi
   fi
@@ -84,17 +83,17 @@ the_key_init() {
 
 #检查文件夹和文件的权限
 check_permission() {
-  permission_dir_dot_ssh=$(stat -c %a /root/.ssh)
-  permission_file_id_rsa=$(stat -c %a /root/.ssh/id_rsa)
-  permission_file_id_rsa_pub=$(stat -c %a /root/.ssh/id_rsa.pub)
+  permission_dir_dot_ssh=$(stat -c %a $HOME/.ssh)
+  permission_file_id_rsa=$(stat -c %a $HOME/.ssh/id_rsa)
+  permission_file_id_rsa_pub=$(stat -c %a $HOME/.ssh/id_rsa.pub)
   if [ "$permission_dir_dot_ssh" != "700" ]; then
-    chmod 700 /root/.ssh
+    chmod 700 $HOME/.ssh
   fi
   if [ "$permission_file_id_rsa" != "600" ]; then
-    chmod 600 /root/.ssh/id_rsa
+    chmod 600 $HOME/.ssh/id_rsa
   fi
   if [ "$permission_file_id_rsa_pub" != "644" ]; then
-    chmod 644 /root/.ssh/id_rsa.pub
+    chmod 644 $HOME/.ssh/id_rsa.pub
   fi
 }
 
@@ -108,12 +107,5 @@ the_service_restart() {
     service ssh restart
     echo "SSH服务已重启"
     echo "运行 systemctl status sshd.service 查看服务状态"
-  fi
-}
-
-check_if_folder_exist() {
-  if [ ! -d "/root/.ssh" ]; then
-    mkdir /root/.ssh
-    echo "文件夹/root/.ssh已自动创建"
   fi
 }
