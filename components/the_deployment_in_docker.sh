@@ -91,13 +91,26 @@ the_docker_run() {
 }
 
 the_docker_registry_operation() {
-  echo -e "\033[33m🚀请输入仓库地址，http(s)://...："
-  read registry_url
-  echo -e "\033[0m"
-  if [ -z "$registry_url" ]; then
-    echo "未输入，默认为docker.io"
+  #检查之前是否保存过仓库地址
+  config_file=$parent_dir/the_deployment_in_docker.conf
+  if [ -f "$config_file" ]; then
+    echo "配置文件$config_file已存在，将自动读取👇"
+    registry_url=$(cat $config_file)
   else
-    echo "🚩仓库地址为：$registry_url"
+    echo "配置文件$config_file不存在，将自动创建..."
+  fi
+  read -p "🚩是否需要修改仓库地址？(y/n)" need_modify_registry_url
+  if [ "$need_modify_registry_url" == "y" ]; then
+    echo -e "\033[33m🚀请输入仓库地址，http(s)://...："
+    read registry_url
+    echo -e "\033[0m"
+    if [ -z "$registry_url" ]; then
+      echo "未输入，默认为docker.io"
+    else
+      echo "🚩仓库地址为：$registry_url"
+      echo "🚩正在保存..."
+      echo $registry_url >$config_file
+    fi
   fi
   docker login $registry_url
   registry_url_no_http=$(echo $registry_url | sed 's/http[s]*:\/\///g')
