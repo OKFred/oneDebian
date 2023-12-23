@@ -31,7 +31,12 @@ the_deployment_in_docker() {
     if [ "$need_dockerization" == "y" ]; then
       echo "本地构建"
       the_docker_build
-      the_docker_run
+      if [ $? -eq 0 ]; then
+        echo "✅构建成功！"
+        the_docker_run
+      else
+        echo "❌构建失败！"
+      fi
     fi
     cd $current_dir
   fi
@@ -80,6 +85,7 @@ the_docker_build() {
 }
 
 the_docker_run() {
+  echo "正在启动容器..."
   echo "端口随机分配，记得做好端口映射哦"
   docker run -d -P $project_name
   if [ $? -eq 0 ]; then
