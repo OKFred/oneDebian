@@ -21,6 +21,7 @@ the_ssh_configuration() {
   else
     apt install ssh openssh-server -y
     the_root_login
+    the_service_restart
   fi
 }
 
@@ -40,19 +41,22 @@ the_root_login() {
   if [ "$need_root_login" != "y" ]; then
     echo "跳过..."
   else
+    cp $original_sshd_file $sshd_file
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/g' $sshd_file
+    echo "已允许root用户远程登录"
+    echo $(grep "PermitRootLogin" $sshd_file)
     read -p "允许密码登录？(y/n)" need_password_login
     read -p "允许密钥登录？(y/n)" need_key_login
     if [ "$need_password_login" == "y" ]; then
-      cp $original_sshd_file $sshd_file
       sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' $sshd_file
       sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/g' $sshd_file
     elif [ "$need_key_login" == "y" ]; then
-      cp $original_sshd_file $sshd_file
       sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' $sshd_file
       the_key_init
     else
       echo "跳过..."
     fi
+    grep "PasswordAuthentication" $sshd_file
   fi
 }
 
@@ -86,5 +90,18 @@ check_permission() {
   fi
   if [ "$permission_file_id_rsa_pub" != "644" ]; then
     chmod 644 /root/.ssh/id_rsa.pub
+  fi
+}
+
+the_service_restart() {
+  echo -e "\033[33m 🚀SSH--是否需要重启SSH服务？(y/n)"
+  read need_service_restart
+  echo -e "\033[0m"
+  if [ "$need_service_restart" != "y" ]; then
+    echo "跳过..."
+  else
+    service ssh restart
+    echo "SSH服务已重启"
+    echo "运行 systemctl status sshd.service 查看服务状态"
   fi
 }
