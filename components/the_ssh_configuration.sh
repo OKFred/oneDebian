@@ -60,6 +60,7 @@ the_key_init() {
   echo -e "\033[33m 🚀SSH--是否需要初始化密钥？(y/n)"
   read need_key_init
   echo -e "\033[0m"
+  check_if_folder_exist
   if [ "$need_key_init" != "y" ]; then
     echo "跳过..."
   elif [ ! -f $ssh_pub_key ]; then
@@ -107,5 +108,12 @@ the_service_restart() {
     service ssh restart
     echo "SSH服务已重启"
     echo "运行 systemctl status sshd.service 查看服务状态"
+  fi
+}
+
+check_if_folder_exist() {
+  if [ ! -d "/root/.ssh" ]; then
+    mkdir /root/.ssh
+    echo "文件夹/root/.ssh已自动创建"
   fi
 }
