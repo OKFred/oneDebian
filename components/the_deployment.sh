@@ -4,8 +4,8 @@
 #@datetime: 2023-12-24
 
 #dependencies--文件依赖
-source ./the_deployment_direct.sh
-source ./the_deployment_in_docker.sh
+source ./components/the_deployment_direct.sh
+source ./components/the_deployment_in_docker.sh
 
 the_deployment() {
   echo "# 🚩  项目部署"
