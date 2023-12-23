@@ -6,4 +6,8 @@
 
 ## 运行方法
 
+### 面向过程的方法
 `cd $HOME/oneDebian && chmod +x index.sh && ./index.sh`
+
+### 面向对象的方法
+`cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh`
