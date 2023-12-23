@@ -140,6 +140,12 @@ the_image_push() {
     echo "🚩正在打包..."
     local docker_tag=$registry_url_no_http/$project_name:$project_version
     docker build -t $docker_tag .
+    if [ $? -eq 0 ]; then
+      echo "✅打包成功！"
+    else
+      echo "❌打包失败！"
+      return 1
+    fi
     echo "🚩准备推送..."
     docker push $docker_tag
     if [ "$project_version" != "latest" ]; then
@@ -154,6 +160,12 @@ the_image_push() {
       echo "🚩正在打包..."
       local docker_tag=$registry_url_no_http/$project_name:$project_version
       docker build -t $docker_tag .
+      if [ $? -eq 0 ]; then
+        echo "✅打包成功！"
+      else
+        echo "❌打包失败！"
+        return 1
+      fi
       echo "🚩准备推送..."
       docker push $docker_tag
     fi
