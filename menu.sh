@@ -30,11 +30,11 @@ menu_back() {
 main() {
   while (true); do
     menu_title
-    echo "00. 准备环境"
-    echo "01. 安装基础工具"
+    echo "00. 更换国内源"
+    echo "01. 安装基础工具nano、wget、git等"
     echo "02. 配置SSH"
     echo "03. 安装nvm、nodeJS 、npm等"
-    echo "04. 安装cockpit"
+    echo "04. 安装cockpit--方便运维"
     echo "05. 安装docker、dockerd、portainer等"
     echo "06. 部署项目"
     echo "07. 更多"
