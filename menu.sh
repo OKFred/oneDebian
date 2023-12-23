@@ -61,4 +61,5 @@ main() {
   done
 }
 
+clear
 main
