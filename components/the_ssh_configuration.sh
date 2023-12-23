@@ -45,6 +45,7 @@ the_root_login() {
     read -p "通过密钥登录？(y/n)" need_key_login
     if [ "$need_key_login" == "y" ]; then
       sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/g' $sshd_file
+      sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/g' $sshd_file
       the_key_init
     else
       read -p "通过密码登录？(y/n)" need_password_login
