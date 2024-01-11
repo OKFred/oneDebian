@@ -33,13 +33,13 @@ the_disk_select() {
   # 提示用户选择磁盘
   select disk in $disks; do
     if [ -n "$disk" ]; then
+      echo $disk
       # echo "your selection--您选择的磁盘是 $disk"
       break
-    else
+      # else
       # echo "invalid selection--无效的选择，请重新选择。"
     fi
   done
-  echo $disk
 }
 
 the_disk_partition() {
