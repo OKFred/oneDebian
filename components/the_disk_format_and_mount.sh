@@ -18,8 +18,10 @@ the_disk_format_and_mount() {
     local disk=$(the_disk_select)
     echo "your selection--您选择的磁盘是 $disk"
     the_disk_partition $disk
-    the_disk_format $disk
-    the_disk_mount $disk
+    local disk_part=$(lsblk -l -o NAME,TYPE | grep "part" | grep "/dev/$disk" | awk '{print $1}')
+    echo "default partition--默认磁盘分区 $disk_part"
+    the_disk_format $disk_part
+    the_disk_mount $disk_part
   fi
 }
 
@@ -66,8 +68,8 @@ the_disk_partition() {
 }
 
 the_disk_format() {
-  local disk=$1
-  if (mount | grep "/dev/$disk"); then
+  local disk_part=$1
+  if (mount | grep "/dev/$disk_part"); then
     echo "disk mounted already--磁盘已经挂载，不能格式化。请先卸载磁盘。"
     exit 1
   fi
@@ -79,9 +81,9 @@ the_disk_format() {
   else
     echo "格式化常用命令：mkfs.ext4(格式化为ext4)、mkfs.xfs(格式化为xfs)"
     echo "格式化为ext4..."
-    mkfs -t ext4 /dev/$disk
+    mkfs -t ext4 /dev/$disk_part
     #检查格式化是否成功
-    if (lsblk -l -o NAME,FSTYPE | grep "/dev/$disk" | grep "ext4"); then
+    if (lsblk -l -o NAME,FSTYPE | grep "/dev/$disk_part" | grep "ext4"); then
       echo "format failed--磁盘格式化失败。"
       exit 1
     fi
@@ -90,8 +92,8 @@ the_disk_format() {
 }
 
 the_disk_mount() {
-  local disk=$1
-  if (mount | grep "/dev/$disk"); then
+  local disk_part=$1
+  if (mount | grep "/dev/$disk_part"); then
     echo "disk mounted already--磁盘已经挂载，不能再次挂载。"
     exit 1
   fi
@@ -101,18 +103,18 @@ the_disk_mount() {
   if [ "$need_disk_mount" != "y" ]; then
     echo "skip--不需要，跳过..."
   else
-    echo -e "\033[33m 🚀mount path--自定义挂载路径（默认/mnt/$disk）："
+    echo -e "\033[33m 🚀mount path--自定义挂载路径（默认/mnt/$disk_part）："
     read mount_path
     echo -e "\033[0m"
     if [ -z "$mount_path" ]; then
-      mount_path="/mnt/$disk"
+      mount_path="/mnt/$disk_part"
     fi
     echo "mount path--挂载路径：$mount_path"
     mkdir -p $mount_path
     echo "mounting--挂载中..."
-    mount /dev/$disk $mount_path
+    mount /dev/$disk_part $mount_path
     #检查挂载是否成功
-    if (mount | grep "/dev/$disk"); then
+    if (mount | grep "/dev/$disk_part"); then
       echo "mount failed--磁盘挂载失败。"
       exit 1
     fi
