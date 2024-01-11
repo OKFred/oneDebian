@@ -56,7 +56,7 @@ the_disk_partition() {
   if [ "$need_disk_partition" != "y" ]; then
     echo "skip--不需要，跳过..."
   else
-    echo "commands--分区常用命令：p(打印分区表)、n(新建分区)、d(删除分区)、w(保存并退出)、q(不保存退出)"
+    echo "commands--分区常用命令：p(rint打印分区表)、n(ew新建分区)、d(elete删除分区)、w(rite保存并退出)、q(uit不保存退出)"
     fdisk /dev/$disk
     #检查分区是否成功
     if (lsblk -l -o NAME,TYPE | grep "part" | grep "/dev/$disk"); then
