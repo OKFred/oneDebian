@@ -12,6 +12,7 @@ source ./components/the_node_installation.sh
 source ./components/the_cockpit_installation.sh
 source ./components/the_docker_installation.sh
 source ./components/the_deployment.sh
+source ./components/the_disk_format_and_mount.sh
 
 menu_title() {
   #clear
@@ -37,7 +38,7 @@ main() {
     echo "05. cockpit service--安装cockpit--方便运维"
     echo "06. container service--安装docker、dockerd、portainer等"
     echo "07. project deployment--部署项目"
-    echo "08. more--更多"
+    echo "08. disk partition, format and mount--磁盘分区、格式化、挂载"
     echo "09. about--关于"
     echo "00. exit--退出"
     echo
@@ -51,7 +52,7 @@ main() {
     05 | 5) the_cockpit_installation ;;
     06 | 6) the_docker_installation ;;
     07 | 7) the_deployment ;;
-    08 | 8) echo 'wait & see--敬请期待' ;;
+    08 | 8) the_disk_format_and_mount ;;
     09 | 9) nano readme.md ;;
     00 | 0) exit 1 ;;
     u) echo "???" ;;
