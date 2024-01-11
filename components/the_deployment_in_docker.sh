@@ -223,7 +223,7 @@ the_container_deployment() {
   else
     the_docker_check_old_batch $repo_name
     echo -e "\033[33m"
-    echo "conntainer name--输入容器名称（可选）："
+    echo "container name--输入容器名称（可选）："
     read container_name
     echo "host port--请输入需要映射的主机端口（若有）："
     read host_port
@@ -259,7 +259,7 @@ the_container_deployment() {
     read need_env
     echo -e "\033[0m"
     if [ "$need_env" == "y" ]; then
-      env_file=$HOME/my-docker-data/$repo_name.env
+      env_file=$HOME/my-docker-data/$container_name.env
       if [ ! -f "$env_file" ]; then
         echo "config file generating--配置文件$env_file不存在，将自动创建👇"
         if ! command -v nano &>/dev/null; then
