@@ -280,6 +280,9 @@ the_container_deployment() {
       read need_env_confirm
       if [ "$need_env_confirm" == "y" ]; then
         params="$params --env-file $env_file"
+      else
+        echo "skip--已跳过"
+        return
       fi
     fi
     echo "🚩starting container with the following params--正在启动容器...，参数为：$params $docker_tag"
