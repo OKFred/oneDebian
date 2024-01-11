@@ -18,7 +18,7 @@ the_disk_format_and_mount() {
     local disk=$(the_disk_select)
     echo "your selection--您选择的磁盘是 $disk"
     the_disk_partition $disk
-    local disk_part=$(lsblk -l -o NAME,TYPE | grep "part" | grep "/dev/$disk" | awk '{print $1}')
+    local disk_part=$(lsblk -l -o NAME,TYPE | grep "part" | grep $disk | awk '{print $1}')
     echo "default partition--默认磁盘分区 $disk_part"
     the_disk_format $disk_part
     the_disk_mount $disk_part
