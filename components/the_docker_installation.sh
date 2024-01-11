@@ -85,7 +85,7 @@ services:
     volumes:
       - $my_project_data_path/my-registry:/var/lib/registry
       - $my_project_data_path/my-secret:/etc/docker/registry
-      - $my_project_data_path/my-config:/var/docker-registry/registry-config #需要配合credentials.yml里的文件指向
+      - $my_project_data_path/my-config:/var/docker-registry/registry-config #需要配合config.yml里的文件指向
     restart: always
   ui:
     image: joxit/docker-registry-ui:latest
@@ -128,7 +128,7 @@ auth:
   htpasswd:
     realm: basic-realm
     path: /var/docker-registry/registry-config/htpasswd  # 密码文件放置
-" >"$my_project_data_path/my-secret/credentials.yml"
+" >"$my_project_data_path/my-secret/config.yml"
 
     echo -e "\033[33m🚀registry username--输入用户名（默认admin）"
     read registry_user
