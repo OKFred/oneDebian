@@ -46,10 +46,10 @@ the_disk_select() {
 
 the_disk_partition() {
   local disk=$1
-  if (mount | grep "/dev/$disk"); then
-    echo "disk mounted already--磁盘已经挂载，不能分区。请先卸载磁盘。"
-    exit 1
-  fi
+  # if (mount | grep "/dev/$disk"); then
+  #   echo "disk mounted already--磁盘已经挂载，不能分区。请先卸载磁盘。"
+  #   exit 1
+  # fi
   echo -e "\033[33m 🚀disk partition--是否需要分区？(y/n)"
   read need_disk_partition
   echo -e "\033[0m"
@@ -69,10 +69,10 @@ the_disk_partition() {
 
 the_disk_format() {
   local disk_part=$1
-  if (mount | grep "/dev/$disk_part"); then
-    echo "disk mounted already--磁盘已经挂载，不能格式化。请先卸载磁盘。"
-    exit 1
-  fi
+  # if (mount | grep "/dev/$disk_part"); then
+  #   echo "disk mounted already--磁盘已经挂载，不能格式化。请先卸载磁盘。"
+  #   exit 1
+  # fi
   echo -e "\033[33m 🚀disk format--是否需要格式化磁盘？(y/n)"
   read need_disk_format
   echo -e "\033[0m"
@@ -93,10 +93,10 @@ the_disk_format() {
 
 the_disk_mount() {
   local disk_part=$1
-  if (mount | grep "/dev/$disk_part"); then
-    echo "disk mounted already--磁盘已经挂载，不能再次挂载。"
-    exit 1
-  fi
+  # if (mount | grep "/dev/$disk_part"); then
+  #   echo "disk mounted already--磁盘已经挂载，不能再次挂载。"
+  #   exit 1
+  # fi
   echo -e "\033[33m 🚀disk mount--是否需要挂载磁盘？(y/n)"
   read need_disk_mount
   echo -e "\033[0m"
