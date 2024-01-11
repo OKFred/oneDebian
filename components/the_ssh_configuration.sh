@@ -80,6 +80,12 @@ the_key_init() {
   if [ -f $ssh_pub_key ]; then
     check_permission
   fi
+  #同时将公钥写入authorized_keys
+  cat $ssh_pub_key >>$HOME/.ssh/authorized_keys
+  #同时启用RSA认证
+  echo 'HostKeyAlgorithms +ssh-rsa
+PubkeyAcceptedKeyTypes +ssh-rsa
+' >>/etc/ssh/sshd_config.d/enable_rsa_keys.conf
 }
 
 #检查文件夹和文件的权限
