@@ -14,7 +14,9 @@ the_disk_format_and_mount() {
     echo "skip--不需要，跳过..."
   else
     lsblk
+    echo "please select--请选择一个磁盘："
     local disk=$(the_disk_select)
+    echo "your selection--您选择的磁盘是 $disk"
     the_disk_partition $disk
     the_disk_format $disk
     the_disk_mount $disk
@@ -25,17 +27,16 @@ the_disk_select() {
   local disks=$(lsblk -l -o NAME,TYPE | grep "disk" | awk '{print $1}')
   # 如果没有找到磁盘，则输出提示信息并退出脚本
   if [ -z "$disks" ]; then
-    echo "no disk available--未找到可用的磁盘。"
+    # echo "no disk available--未找到可用的磁盘。"
     exit 1
   fi
   # 提示用户选择磁盘
-  echo "please select--请选择一个磁盘："
   select disk in $disks; do
     if [ -n "$disk" ]; then
-      echo "your selection--您选择的磁盘是 $disk"
+      # echo "your selection--您选择的磁盘是 $disk"
       break
     else
-      echo "invalid selection--无效的选择，请重新选择。"
+      # echo "invalid selection--无效的选择，请重新选择。"
     fi
   done
   echo $disk
