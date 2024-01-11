@@ -67,6 +67,12 @@ the_registry_installation() {
     echo "$my_project_data_path"
     mkdir -p "$my_project_data_path"
     chmod +x "$my_project_data_path"
+    mkdir -p "$my_project_data_path/my-registry"
+    chmod +x "$my_project_data_path/my-registry"
+    mkdir -p "$my_project_data_path/my-secret"
+    chmod +x "$my_project_data_path/my-secret"
+    mkdir -p "$my_project_data_path/my-config"
+    chmod +x "$my_project_data_path/my-config"
     apt install -y docker-compose apache2-utils
     echo 'making files--创建docker-compose配置文件。记得公网内网地址根据实际调整'
     echo "
@@ -77,9 +83,9 @@ services:
     ports:
       - 8001:5000
     volumes:
-      - $my_project_data_path/registry:/var/lib/registry
-      - $my_project_data_path/credentials.yml:/etc/docker/registry/config.yml
-      - $my_project_data_path/htpasswd:/var/docker-registry/registry-config/htpasswd #需要配合credentials.yml里的文件指向
+      - $my_project_data_path/my-registry:/var/lib/registry
+      - $my_project_data_path/my-secret:/etc/docker/registry
+      - $my_project_data_path/my-config:/var/docker-registry/registry-config #需要配合credentials.yml里的文件指向
     restart: always
   ui:
     image: joxit/docker-registry-ui:latest
@@ -122,7 +128,7 @@ auth:
   htpasswd:
     realm: basic-realm
     path: /var/docker-registry/registry-config/htpasswd  # 密码文件放置
-" >"$my_project_data_path/credentials.yml"
+" >"$my_project_data_path/my-secret/credentials.yml"
 
     echo -e "\033[33m🚀registry username--输入用户名（默认admin）"
     read registry_user
