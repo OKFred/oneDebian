@@ -23,6 +23,6 @@
 5.  安装 cockpit--方便运维
 6.  安装 docker、dockerd、portainer 等
 7.  部署项目
-8.  更多
+8.  磁盘分区、格式化、挂载
 9.  关于
 10. 退出
