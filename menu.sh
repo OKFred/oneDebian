@@ -18,30 +18,30 @@ menu_title() {
   date
   echo "执行需要管理员权限。请注意"
   echo "*********************"
-  echo "*****   工具箱   *****"
+  echo "*****   工具箱Tool   *****"
 }
 
 menu_back() {
   echo
-  echo -n "按任意键返回."
+  echo -n "press any key--按任意键返回."
   read
 }
 
 main() {
   while (true); do
     menu_title
-    echo "01. 更换国内源"
-    echo "02. 安装基础工具nano、wget、git等"
-    echo "03. 配置SSH"
-    echo "04. 安装nvm、nodeJS 、npm等"
-    echo "05. 安装cockpit--方便运维"
-    echo "06. 安装docker、dockerd、portainer等"
-    echo "07. 部署项目"
-    echo "08. 更多"
-    echo "09. 关于"
-    echo "00. 退出"
+    echo "01. local repo--更换国内源"
+    echo "02. basic setup--安装基础工具nano、wget、git等"
+    echo "03. remote shell--配置SSH"
+    echo "04. Node service--安装nvm、nodeJS 、npm等"
+    echo "05. cockpit service--安装cockpit--方便运维"
+    echo "06. container service--安装docker、dockerd、portainer等"
+    echo "07. project deployment--部署项目"
+    echo "08. more--更多"
+    echo "09. about--关于"
+    echo "00. exit--退出"
     echo
-    echo -n "请输入你的选择："
+    echo -n "your choice--请输入你的选择："
     read the_user_choice
     case "$the_user_choice" in
     01 | 1) the_repo_localization ;;
@@ -51,11 +51,11 @@ main() {
     05 | 5) the_cockpit_installation ;;
     06 | 6) the_docker_installation ;;
     07 | 7) the_deployment ;;
-    08 | 8) echo '敬请期待' ;;
+    08 | 8) echo 'wait & see--敬请期待' ;;
     09 | 9) nano readme.md ;;
     00 | 0) exit 1 ;;
     u) echo "???" ;;
-    *) echo "输入有误，请重新输入！" && menu_back ;;
+    *) echo "error input--输入有误，请重新输入！" && menu_back ;;
     esac
     echo
   done

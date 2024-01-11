@@ -14,30 +14,30 @@ project_name=$(whoami)_nodejs_$parent_folder
 
 the_deployment_direct() {
   if ! command -v npm &>/dev/null; then
-    echo "请先安装nodejs、npm等"
+    echo "prerequisites--请先安装nodejs、npm等"
     return 1
   else
-    echo -e "\033[33m🚀是否需要启动项目？(y/n)"
+    echo -e "\033[33m🚀init project--是否需要启动项目？(y/n)"
     read need_start_project
     echo -e "\033[0m"
     if [ "$need_start_project" != "y" ]; then
-      echo "项目未启动"
+      echo "skip--项目未启动"
     else
-      echo "🚩正在启动项目..."
+      echo "🚩starting project--正在启动项目..."
       the_entrypoint_initialization
       if [ $? -ne 0 ]; then
-        echo "❌启动失败！"
+        echo "❌start fail--启动失败！"
         return 1
       fi
       the_service_registration
-      echo "✅启动完成！"
+      echo "✅start success--启动完成！"
     fi
   fi
 }
 
 the_entrypoint_initialization() {
   if [ ! -f "$parent_dir/package.json" ]; then
-    echo "配置文件package.json不存在！"
+    echo "config file missing--配置文件package.json不存在！"
     return 1
   fi
   echo "#!/bin/bash
@@ -69,23 +69,23 @@ the_service_registration() {
   " >$project_name.service
   mv $project_name.service /etc/systemd/system/$project_name.service
   if [ -f "/etc/systemd/system/$project_name.service" ]; then
-    echo "✅服务注册成功！"
+    echo "✅service registered--服务注册成功！"
   else
-    echo "❌服务注册失败！"
+    echo "❌service unable to register--服务注册失败！"
     return 1
   fi
   systemctl daemon-reload
   systemctl restart $project_name
 
-  echo -e "\033[33m🚀是否需要设置开机自启？(y/n)"
+  echo -e "\033[33m🚀start on boot--是否需要设置开机自启？(y/n)"
   read need_start_on_boot
   echo -e "\033[0m"
   if [ "$need_start_on_boot" != "y" ]; then
     systemctl disable $project_name
-    echo "❌已取消开机自启"
+    echo "❌skip--已取消开机自启"
   else
     systemctl enable $project_name
-    echo "✅已设置开机自启"
+    echo "✅enable start on boot--已设置开机自启"
   fi
-  echo "登录cockpit查看运行情况，或运行：systemctl status $project_name"
+  echo "status check--登录cockpit查看运行情况，或运行：systemctl status $project_name"
 }
