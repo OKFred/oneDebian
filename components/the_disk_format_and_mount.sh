@@ -111,6 +111,8 @@ the_disk_mount() {
     fi
     echo "mount path--挂载路径：$mount_path"
     mkdir -p $mount_path
+    #设置禁止写入，防止误操作
+    chmod 000 $mount_path
     #通过UUID挂载磁盘，先blkid
     blkid
     local disk_part_uuid=$(blkid | grep "/dev/$disk_part" | awk '{print $2}' | awk -F '"' '{print $2}')
