@@ -111,14 +111,19 @@ the_disk_mount() {
     fi
     echo "mount path--挂载路径：$mount_path"
     mkdir -p $mount_path
-    echo "mounting--挂载中..."
-    mount /dev/$disk_part $mount_path
-    #检查挂载是否成功
-    if (mount | grep "/dev/$disk_part"); then
-      echo "mount failed--磁盘挂载失败。"
-      exit 1
+    #通过UUID挂载磁盘，先blkid
+    blkid
+    local disk_part_uuid=$(blkid | grep "/dev/$disk_part" | awk '{print $2}' | awk -F '"' '{print $2}')
+    echo "disk part uuid--磁盘分区UUID：$disk_part_uuid"
+    echo "mount disk--挂载磁盘..."
+    mount -U $disk_part_uuid $mount_path
+    #更新到/etc/fstab
+    echo "update /etc/fstab--更新/etc/fstab"
+    if (grep "$disk_part_uuid" /etc/fstab); then
+      echo "fstab updated already--/etc/fstab已经更新，不需要再次更新。"
+    else
+      echo "fstab updated--/etc/fstab更新完成。"
+      echo "UUID=$disk_part_uuid $mount_path ext4 defaults 0 0" >>/etc/fstab
     fi
-    lsblk
-    echo "mount success--磁盘挂载成功。"
   fi
 }
