@@ -7,8 +7,8 @@
 #none
 sshd_file=/etc/ssh/sshd_config
 original_sshd_file=/etc/ssh/sshd_config.bak
-ssh_pub_key=$HOME/.ssh/id_rsa.pub
-ssh_private_key=$HOME/.ssh/id_rsa
+ssh_pub_key=$HOME/.ssh/ecdsa.pub
+ssh_private_key=$HOME/.ssh/ecdsa
 
 the_ssh_configuration() {
   the_config_backup
@@ -64,7 +64,7 @@ the_key_init() {
   if [ "$need_key_init" != "y" ]; then
     echo "skip--跳过..."
   elif [ ! -f $ssh_pub_key ]; then
-    ssh-keygen -t rsa -P "" -f $ssh_private_key
+    ssh-keygen -t ecdsa -b 521 -P "" -f $ssh_private_key
     echo "generated--密钥已生成"
   else
     echo -e "\033[33m 🚀key file override--密钥已存在，是否覆盖？(y/n)"
@@ -73,7 +73,7 @@ the_key_init() {
     if [ "$need_key_cover" != "y" ]; then
       echo "skip--跳过..."
     else
-      ssh-keygen -t rsa -P "" -f $ssh_private_key
+      ssh-keygen -t ecdsa -b 521 -P "" -f $ssh_private_key
       echo "key file generated--密钥已生成"
     fi
   fi
@@ -82,25 +82,21 @@ the_key_init() {
   fi
   #同时将公钥写入authorized_keys
   cat $ssh_pub_key >>$HOME/.ssh/authorized_keys
-  #同时启用RSA认证
-  echo 'HostKeyAlgorithms +ssh-rsa
-PubkeyAcceptedKeyTypes +ssh-rsa
-' >>/etc/ssh/sshd_config.d/enable_rsa_keys.conf
 }
 
 #检查文件夹和文件的权限
 check_permission() {
   permission_dir_dot_ssh=$(stat -c %a $HOME/.ssh)
-  permission_file_id_rsa=$(stat -c %a $HOME/.ssh/id_rsa)
-  permission_file_id_rsa_pub=$(stat -c %a $HOME/.ssh/id_rsa.pub)
+  permission_file_ecdsa=$(stat -c %a $HOME/.ssh/ecdsa)
+  permission_file_ecdsa_pub=$(stat -c %a $HOME/.ssh/ecdsa.pub)
   if [ "$permission_dir_dot_ssh" != "700" ]; then
     chmod 700 $HOME/.ssh
   fi
-  if [ "$permission_file_id_rsa" != "600" ]; then
-    chmod 600 $HOME/.ssh/id_rsa
+  if [ "$permission_file_ecdsa" != "600" ]; then
+    chmod 600 $HOME/.ssh/ecdsa
   fi
-  if [ "$permission_file_id_rsa_pub" != "644" ]; then
-    chmod 644 $HOME/.ssh/id_rsa.pub
+  if [ "$permission_file_ecdsa_pub" != "644" ]; then
+    chmod 644 $HOME/.ssh/ecdsa.pub
   fi
 }
 
