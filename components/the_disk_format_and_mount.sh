@@ -13,6 +13,7 @@ the_disk_format_and_mount() {
   if [ "$need_disk_tool" != "y" ]; then
     echo "skip--不需要，跳过..."
   else
+    lsblk
     local disk=$(the_disk_select)
     the_disk_partition $disk
     the_disk_format $disk
@@ -21,7 +22,6 @@ the_disk_format_and_mount() {
 }
 
 the_disk_select() {
-  lsblk
   local disks=$(lsblk -l -o NAME,TYPE | grep "disk" | awk '{print $1}')
   # 如果没有找到磁盘，则输出提示信息并退出脚本
   if [ -z "$disks" ]; then
