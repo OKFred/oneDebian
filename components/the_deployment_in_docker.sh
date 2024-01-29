@@ -229,10 +229,18 @@ the_container_deployment() {
     read host_port
     echo "container port--请输入需要映射的容器端口（若有）："
     read container_port
+    echo "host port extra--请输入需要额外映射的主机端口（若有）："
+    read host_port_extra
+    echo "container port extra--请输入需要额外映射的容器端口（若有）："
+    read container_port_extra
     echo "host directory--请输入需要挂载的主机目录（若有）："
     read host_dir
     echo "container directory--请输入需要挂载的容器目录（若有）："
     read container_dir
+    echo "host directory extra--请输入需要额外挂载的主机目录（若有）："
+    read host_dir_extra
+    echo "container directory extra--请输入需要额外挂载的容器目录（若有）："
+    read container_dir_extra
     echo "auto restart--是否需要自动启动？(--restart=always)? (y/n)"
     read need_auto_restart
     local params=""
@@ -245,8 +253,14 @@ the_container_deployment() {
       echo "⚠️random ports--未映射端口，将随机分配"
       params="$params -P"
     fi
+    if [ -n "$host_port_extra" ] && [ -n "$container_port_extra" ]; then
+      params="$params -p $host_port_extra:$container_port_extra"
+    fi
     if [ -n "$host_dir" ] && [ -n "$container_dir" ]; then
       params="$params -v $host_dir:$container_dir"
+    fi
+    if [ -n "$host_dir_extra" ] && [ -n "$container_dir_extra" ]; then
+      params="$params -v $host_dir_extra:$container_dir_extra"
     fi
     if [ -z "$need_auto_restart" ]; then
       echo "⚠️stay default auto restart--已默认自动启动"
