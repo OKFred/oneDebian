@@ -99,6 +99,9 @@ the_docker_run() {
 the_docker_registry_operation() {
   #检查之前是否保存过仓库地址
   config_file=$HOME/my-docker-data/my.docker.conf
+  if [ ! -d "$HOME/my-docker-data" ]; then
+    mkdir -p $HOME/my-docker-data
+  fi
   if [ -f "$config_file" ]; then
     #echo "配置文件$config_file已存在，将自动读取"
     registry_url=$(cat $config_file)
