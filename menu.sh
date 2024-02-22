@@ -13,6 +13,10 @@ source ./components/the_cockpit_installation.sh
 source ./components/the_docker_installation.sh
 source ./components/the_deployment.sh
 source ./components/the_disk_format_and_mount.sh
+source ./components/the_nginx_installer.sh
+source ./components/the_nginx_forwarder.sh
+source ./components/the_nginx_restarter.sh
+source ./components/the_nginx_port_cleaner.sh
 
 menu_title() {
   #clear
@@ -39,7 +43,11 @@ main() {
     echo "06. container service--安装docker、dockerd、portainer等"
     echo "07. project deployment--部署项目"
     echo "08. disk partition, format and mount--磁盘分区、格式化、挂载"
-    echo "09. about--关于"
+    echo "09. nginx installer--安装配置nginx"
+    echo "10. nginx forwarder--配置nginx转发"
+    echo "11. nginx restarter--重启nginx"
+    echo "12. nginx port cleaner--清理nginx端口"
+    echo "99. about--关于"
     echo "00. exit--退出"
     echo
     echo -n "your choice--请输入你的选择："
@@ -53,7 +61,11 @@ main() {
     06 | 6) the_docker_installation ;;
     07 | 7) the_deployment ;;
     08 | 8) the_disk_format_and_mount ;;
-    09 | 9) nano readme.md ;;
+    09 | 9) the_nginx_installer ;;
+    10) the_nginx_forwarder ;;
+    11) the_nginx_restarter ;;
+    12) the_nginx_port_cleaner ;;
+    99) nano readme.md ;;
     00 | 0) exit 1 ;;
     u) echo "???" ;;
     *) echo "error input--输入有误，请重新输入！" && menu_back ;;
