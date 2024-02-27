@@ -7,33 +7,45 @@
 # none
 
 current_dir=$(pwd) # 获取当前工作目录的绝对路径
-current_folder=$(basename "$PWD")
-parent_dir=$(dirname "$current_dir")    # 获取当前工作目录的父目录路径
-parent_folder=$(basename "$parent_dir") # 获取父目录的名称
-project_name=$(whoami)_nodejs_$parent_folder
 
 the_deployment_in_docker() {
   if ! command -v docker &>/dev/null; then
     echo "please install docker--请先安装docker等"
     return 1
   else
-    cd $parent_dir
-    the_docker_check_old_batch $project_name
-    echo -e "\033[33m🚀remote registry--是否需要用到远程仓库？(y/n)"
-    read need_registry
+    echo -e "\033[33m🚀log in docker remote registry--是否需要用到远程仓库？(y/n)"
+    read need_login
     echo -e "\033[0m"
-    if [ "$need_registry" == "y" ]; then
-      the_docker_registry_operation
+    if [ "$need_login" == "y" ]; then
+      the_docker_login_and_run
     fi
     echo -e "\033[33m🚀docker build--是否需要使用docker构建项目？(y/n)"
     read need_dockerization
     echo -e "\033[0m"
     if [ "$need_dockerization" == "y" ]; then
+      local project_dir
+      local project_name
+      local project_version
+      read -p "🚩project folder--请输入项目文件夹名称：" project_dir
+      if [ -z "$project_dir" ]; then
+        return 1
+      fi
+      cd $project_dir
       echo "build locally--本地构建"
-      the_docker_build
+      read -p "🚩project name--请输入项目名称：" project_name
+      if [ -z "$project_name" ]; then
+        echo "exit--未输入，结束任务"
+        return 1
+      fi
+      read -p "🚩project version--请输入项目版本：" project_version
+      if [ -z "$project_version" ]; then
+        echo "stay default--未输入，已默认为latest"
+        project_version="latest"
+      fi
+      the_docker_build $project_name $project_version
       if [ $? -eq 0 ]; then
         echo "✅build success--构建成功！"
-        the_docker_run
+        the_docker_run $project_name $project_version
       else
         echo "❌build fail--构建失败！"
       fi
@@ -77,17 +89,21 @@ the_docker_check_old_batch() {
 }
 
 the_docker_build() {
+  local project_name=$1
+  local project_version=$2
   if [ ! -f "Dockerfile" ]; then
     echo "file missing--配置文件Dockerfile不存在！"
     return 1
   fi
-  docker build -t $project_name .
+  docker build -t $project_name:$project_version .
 }
 
 the_docker_run() {
+  local project_name=$1
+  local project_version=$2
   echo "container starting--正在启动容器..."
   echo "random port assigned--端口随机分配，记得做好端口映射哦"
-  docker run -d -P $project_name
+  docker run -d -P $project_name:$project_version
   if [ $? -eq 0 ]; then
     echo "service registered--✅服务注册成功！"
     docker ps | grep $project_name
@@ -96,7 +112,7 @@ the_docker_run() {
   fi
 }
 
-the_docker_registry_operation() {
+the_docker_login_and_run() {
   #检查之前是否保存过仓库地址
   config_file=$HOME/my-docker-data/my.docker.conf
   if [ ! -d "$HOME/my-docker-data" ]; then
@@ -128,22 +144,33 @@ the_docker_registry_operation() {
   registry_url_no_http=$(echo $registry_url | sed 's/http[s]*:\/\///g')
   if [ $? -eq 0 ]; then
     echo "✅log in success--登录成功！"
-    the_image_push
     the_image_pull
+    the_image_push
   else
     echo "❌log in fail--登录失败！"
   fi
 }
 
 the_image_push() {
-  echo -e "\033[33m🚀push to the registry--是否要推送该项目到仓库？(y/n)"
+  echo -e "\033[33m🚀push to the registry--是否要推送项目到仓库？(y/n)"
   read need_push
   echo -e "\033[0m"
   if [ "$need_push" != "y" ]; then
     echo "skip--已跳过"
   else
-    local project_name=$parent_folder
+    local project_dir
+    local project_name
     local project_version
+    read -p "🚩project folder--请输入项目文件夹名称：" project_dir
+    if [ -z "$project_dir" ]; then
+      return 1
+    fi
+    cd $project_dir
+    read -p "🚩project name--请输入项目名称：" project_name
+    if [ -z "$project_name" ]; then
+      echo "exit--未输入，结束任务"
+      return 1
+    fi
     read -p "🚩project version--请输入项目版本：" project_version
     if [ -z "$project_version" ]; then
       echo "stay default--未输入，已默认为latest"
