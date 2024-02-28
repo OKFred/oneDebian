@@ -21,7 +21,7 @@ source ./components/the_nginx_port_cleaner.sh
 menu_title() {
   #clear
   date
-  echo "执行需要管理员权限。请注意"
+  echo "执行需要管理员权限。请注意Root Required"
   echo "*********************"
   echo "*****   工具箱Tool   *****"
 }
