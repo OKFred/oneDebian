@@ -212,7 +212,7 @@ the_image_push() {
 }
 
 the_image_pull() {
-  echo -e "\033[33m🚀extra images needed--是否有额外的镜像要从仓库中拉取？(y/n)"
+  echo -e "\033[33m🚀need pull images--是否有镜像要从仓库中拉取？(y/n)"
   read need_pull
   echo -e "\033[0m"
   if [ "$need_pull" != "y" ]; then

@@ -19,9 +19,8 @@ source ./components/the_nginx_restarter.sh
 source ./components/the_nginx_port_cleaner.sh
 
 menu_title() {
-  #clear
   date
-  echo "执行需要管理员权限。请注意Root Required"
+  echo "Root Required--执行需要管理员权限。请注意"
   echo "*********************"
   echo "*****   工具箱Tool   *****"
 }
@@ -30,6 +29,7 @@ menu_back() {
   echo
   echo -n "press any key--按任意键返回."
   read
+  clear
 }
 
 main() {
@@ -66,7 +66,7 @@ main() {
     11) the_nginx_restarter ;;
     12) the_nginx_port_cleaner ;;
     99) nano readme.md ;;
-    00 | 0) exit 1 ;;
+    00 | 0 | "") exit 1 ;;
     u) echo "???" ;;
     *) echo "error input--输入有误，请重新输入！" && menu_back ;;
     esac
