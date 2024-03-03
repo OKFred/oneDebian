@@ -8,11 +8,9 @@
 
 ### 面向过程的方法
 
-`cd $HOME/oneDebian && chmod +x index.sh && ./index.sh`
+`cd $HOME && git clone https://github.com/OKFred/oneDebian`
 
-### 面向对象的方法
-
-`cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh`
+`cd $HOME/oneDebian && git reset --hard HEAD && git pull && chmod +x menu.sh && ./menu.sh`
 
 #### 菜单预览
 
