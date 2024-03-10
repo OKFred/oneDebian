@@ -279,12 +279,13 @@ the_container_deployment() {
     fi
     if [ -n "$host_port" ] && [ -n "$container_port" ]; then
       params="$params -p $host_port:$container_port"
-    else
-      echo "⚠️random ports--未映射端口，将随机分配"
-      params="$params -P"
     fi
     if [ -n "$host_port_extra" ] && [ -n "$container_port_extra" ]; then
       params="$params -p $host_port_extra:$container_port_extra"
+    fi
+    if [ -z "$host_port" ] && [ -z "$host_port_extra" ]; then
+      echo "⚠️random ports--未映射端口，将随机分配"
+      params="$params -P"
     fi
     if [ -n "$host_dir" ] && [ -n "$container_dir" ]; then
       params="$params -v $host_dir:$container_dir"
