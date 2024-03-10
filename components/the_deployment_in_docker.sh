@@ -141,7 +141,6 @@ the_docker_login_and_run() {
     fi
   fi
   docker login $registry_url
-  registry_url_no_http=$(echo $registry_url | sed 's/http[s]*:\/\///g')
   if [ $? -eq 0 ]; then
     echo "✅log in success--登录成功！"
     the_image_pull
@@ -149,6 +148,7 @@ the_docker_login_and_run() {
   else
     echo "❌log in fail--登录失败！"
   fi
+  registry_url_no_http=$(echo $registry_url | sed 's/http[s]*:\/\///g')
 }
 
 the_image_push() {
