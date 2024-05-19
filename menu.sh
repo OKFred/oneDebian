@@ -13,10 +13,8 @@ source ./components/the_cockpit_installation.sh
 source ./components/the_docker_installation.sh
 source ./components/the_deployment.sh
 source ./components/the_disk_format_and_mount.sh
-source ./components/the_nginx_installer.sh
-source ./components/the_nginx_forwarder.sh
-source ./components/the_nginx_restarter.sh
-source ./components/the_nginx_port_cleaner.sh
+source ./components/the_latest_image_updater.sh
+source ./components/the_unused_image_removal.sh
 
 menu_title() {
   date
@@ -43,10 +41,8 @@ main() {
     echo "06. container service--安装docker、dockerd、portainer等"
     echo "07. project deployment--部署项目"
     echo "08. disk partition, format and mount--磁盘分区、格式化、挂载"
-    echo "09. nginx installer--安装配置nginx"
-    echo "10. nginx forwarder--配置nginx转发"
-    echo "11. nginx restarter--重启nginx"
-    echo "12. nginx port cleaner--清理nginx端口"
+    echo "10. the latest image updater--更新到新版的linux镜像"
+    echo "11. the unused image removal--清理未使用的linux版本镜像"
     echo "99. about--关于"
     echo "00. exit--退出"
     echo
@@ -61,10 +57,8 @@ main() {
     06 | 6) the_docker_installation ;;
     07 | 7) the_deployment ;;
     08 | 8) the_disk_format_and_mount ;;
-    09 | 9) the_nginx_installer ;;
-    10) the_nginx_forwarder ;;
-    11) the_nginx_restarter ;;
-    12) the_nginx_port_cleaner ;;
+    10) the_latest_image_updater ;;
+    11) the_unused_image_removal ;;
     99) nano readme.md ;;
     00 | 0 | "") exit 1 ;;
     u) echo "???" ;;
