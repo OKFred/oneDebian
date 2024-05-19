@@ -1,6 +1,8 @@
 #!/bin/bash
+#@description: 获取当前运行的内核版本
+#@author: Fred Zhang Qi
+#@datetime: 2024-05-19
 
-# 获取当前运行的内核版本
 the_unused_image_removal() {
   current_kernel=$(uname -r)
   echo "当前内核版本: $current_kernel"

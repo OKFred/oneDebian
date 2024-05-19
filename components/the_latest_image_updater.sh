@@ -1,5 +1,7 @@
 #!/bin/bash
-# 脚本用于在 Debian Bookworm 上升级到最新版本的内核
+#@description: 用于在 Debian Bookworm 上升级到最新版本的内核
+#@author: Fred Zhang Qi
+#@datetime: 2024-05-19
 
 the_latest_image_updater() {
   # 更新软件包列表
