@@ -25,8 +25,6 @@ the_latest_image_updater() {
     echo "No kernel updates found in backports. Exiting."
     exit 1
   fi
-  sudo apt install $KERNEL_HEADERS
-
   sudo apt  install -y $KERNEL_IMAGE $KERNEL_HEADERS
   # 更新 GRUB 配置
   echo "Updating GRUB configuration..."
