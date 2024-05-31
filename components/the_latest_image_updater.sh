@@ -15,7 +15,6 @@ the_latest_image_updater() {
   # 再次更新软件包列表以包含 backports 包
   echo "Updating package list with backports..."
   sudo apt update
-  sudo apt upgrade -y
 
   # 查找并安装最新的内核镜像和头文件包
   echo "Installing the latest kernel image and headers from backports..."
