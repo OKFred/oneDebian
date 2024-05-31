@@ -15,18 +15,19 @@ the_latest_image_updater() {
   # 再次更新软件包列表以包含 backports 包
   echo "Updating package list with backports..."
   sudo apt update
+  sudo apt upgrade
 
   # 查找并安装最新的内核镜像和头文件包
   echo "Installing the latest kernel image and headers from backports..."
-  KERNEL_IMAGE=$(apt-cache search linux-image | grep bookworm-backports | sort -V | tail -n 1 | awk '{print $1}')
-  KERNEL_HEADERS=$(apt-cache search linux-headers | grep bookworm-backports | sort -V | tail -n 1 | awk '{print $1}')
-
+  KERNEL_IMAGE=$(apt-cache search linux-image | tail -n 2 | head -n 1 | awk '{print $1}')
+  KERNEL_HEADERS=$(echo $KERNEL_IMAGE | sed 's/image/headers/')
   if [ -z "$KERNEL_IMAGE" ] || [ -z "$KERNEL_HEADERS" ]; then
     echo "No kernel updates found in backports. Exiting."
     exit 1
   fi
+  sudo apt install $KERNEL_HEADERS
 
-  sudo apt -t bookworm-backports install -y $KERNEL_IMAGE $KERNEL_HEADERS
+  sudo apt  install -y $KERNEL_IMAGE $KERNEL_HEADERS
   # 更新 GRUB 配置
   echo "Updating GRUB configuration..."
   sudo update-initramfs -u
