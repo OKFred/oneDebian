@@ -19,7 +19,14 @@ the_docker_installation() {
       echo "installed already--docker似乎已安装"
     else
       echo "⏬downloading--正在下载docker"
-      wget -qO- online_docker_install.sh https://get.docker.com | bash
+      # wget -qO- online_docker_install.sh https://get.docker.com | bash  # 国内不一定能用
+      apt install ca-certificates curl gnupg
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      echo   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/debian \
+        "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" |   tee /etc/apt/sources.list.d/docker.list > /dev/null
+      apt update
+      apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     fi
     docker -v
     docker ps
