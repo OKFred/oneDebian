@@ -70,7 +70,7 @@ the_registry_installation() {
     fi
     echo "🚩installing--正在安装 registry..."
     echo 'create directory--创建目录'
-    my_project_data_path="$HOME/my-docker-data/my-registry-data"
+    my_project_data_path="$HOME/my-docker-data/registry"
     echo "$my_project_data_path"
     mkdir -p "$my_project_data_path"
     chmod +x "$my_project_data_path"
