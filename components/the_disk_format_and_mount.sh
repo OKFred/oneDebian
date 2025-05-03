@@ -127,5 +127,14 @@ the_disk_mount() {
       echo "fstab updated--/etc/fstab更新完成。"
       echo "UUID=$disk_part_uuid $mount_path ext4 defaults 0 0" >>/etc/fstab
     fi
+    #重新加载systemd管理器配置
+    echo "reload systemd--重新加载systemd管理器配置..."
+    systemctl daemon-reload
+    #检查挂载是否成功
+    if (mount | grep "$mount_path"); then
+      echo "mount failed--磁盘挂载失败。"
+      exit 1
+    fi
+    echo "mount success--磁盘挂载完成。"
   fi
 }
