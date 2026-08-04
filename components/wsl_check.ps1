@@ -23,20 +23,25 @@ function Invoke-WslPrecheck {
     # 1. CPU 硬件虚拟化
     Write-Host "`n$(Get-I18nStr 'Check_Step1')" -ForegroundColor Yellow
     try {
-        $cpuInfo = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
-        if ($null -ne $cpuInfo.VirtualizationFirmwareEnabled) {
-            if ($cpuInfo.VirtualizationFirmwareEnabled) {
-                Write-Host "  [✓] $(if ($global:CurrentLang -eq 'zh-CN') { 'CPU 硬件虚拟化已在 BIOS/UEFI 中成功启用！' } else { 'CPU Hardware Virtualization is enabled in BIOS/UEFI!' })" -ForegroundColor Green
-            } else {
-                Write-Host "  [!] $(if ($global:CurrentLang -eq 'zh-CN') { '警告: CPU 支持虚拟化，但 BIOS/UEFI 中未开启 Virtualization (VT-x/AMD-V)！' } else { 'Warning: CPU supports virtualization, but VT-x/AMD-V is disabled in BIOS/UEFI!' })" -ForegroundColor Red
-                $hasIssue = $true
-            }
-        } else {
-            Write-Host "  [✓] $(if ($global:CurrentLang -eq 'zh-CN') { 'CPU 架构符合虚拟化基本条件。' } else { 'CPU supports virtualization.' })" -ForegroundColor Green
+        $csInfo = Get-CimInstance -ClassName Win32_ComputerSystem 2>$null
+        $cpuInfo = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1 2>$null
+
+        # 科学严谨判断 1: 若 HypervisorPresent 为 True，说明 Hyper-V 虚拟化已经在运行，BIOS 绝对已开启！
+        if ($csInfo -and $csInfo.HypervisorPresent) {
+            Write-Host "  [✓] $(if ($global:CurrentLang -eq 'zh-CN') { 'CPU 硬件虚拟化已在 BIOS/UEFI 中开启且 Hyper-V 监控程序正在运行！' } else { 'CPU Hardware Virtualization is enabled in BIOS and Hyper-V is running!' })" -ForegroundColor Green
+        }
+        # 判断 2: 若未检测到 Hypervisor 运行，再去查看 BIOS 标志
+        elseif ($null -ne $cpuInfo.VirtualizationFirmwareEnabled -and $cpuInfo.VirtualizationFirmwareEnabled) {
+            Write-Host "  [✓] $(if ($global:CurrentLang -eq 'zh-CN') { 'CPU 硬件虚拟化已在 BIOS/UEFI 中成功启用！' } else { 'CPU Hardware Virtualization is enabled in BIOS/UEFI!' })" -ForegroundColor Green
+        }
+        else {
+            Write-Host "  [!] $(if ($global:CurrentLang -eq 'zh-CN') { '警告: 未检测到虚拟化监控程序运行，请确认 BIOS 中已开启 VT-x/AMD-V！' } else { 'Warning: Hypervisor not present. Ensure VT-x/AMD-V is enabled in BIOS.' })" -ForegroundColor Red
+            $hasIssue = $true
         }
     } catch {
         Write-Host "  [✓] CPU Check Complete." -ForegroundColor Gray
     }
+
 
     # 2. Windows 虚拟化可选功能检测
     Write-Host "`n$(Get-I18nStr 'Check_Step2')" -ForegroundColor Yellow
