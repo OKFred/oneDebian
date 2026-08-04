@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_status.ps1
-# Description: 07. WSL 运维诊断与实例状态仪表盘 (支持 i18n 多语言)
+# Description: 07. WSL 运维诊断与实例状态仪表盘 (100% 全量双语 i18n 兼容)
 # ==============================================================================
 
 param(
@@ -16,17 +16,17 @@ function Show-WslDashboard {
     Write-Host "==========================================" -ForegroundColor Cyan
 
     # 1. 读取 WSL 核心环境信息
-    Write-Host "`n[1/3 WSL 基础架构环境诊断]" -ForegroundColor Yellow
+    Write-Host "`n$(Get-I18nStr 'Status_Step1')" -ForegroundColor Yellow
     $wslVerRaw = & wsl.exe --version 2>$null
     if ($LASTEXITCODE -eq 0 -and $wslVerRaw) {
         $firstLine = ($wslVerRaw | Select-Object -First 1) -replace "`0", ""
-        Write-Host "  • WSL Service Status: Normal ($firstLine)" -ForegroundColor Green
+        Write-Host "  • $(if ($global:CurrentLang -eq 'zh-CN') { 'WSL 核心服务' } else { 'WSL Service Status' }): $(if ($global:CurrentLang -eq 'zh-CN') { '正常运行' } else { 'Normal' }) ($firstLine)" -ForegroundColor Green
     } else {
-        Write-Host "  • WSL Service Status: Installed" -ForegroundColor Gray
+        Write-Host "  • $(if ($global:CurrentLang -eq 'zh-CN') { 'WSL 核心服务' } else { 'WSL Service Status' }): $(if ($global:CurrentLang -eq 'zh-CN') { '已安装' } else { 'Installed' })" -ForegroundColor Gray
     }
 
     # 2. 读取所有已安装的 WSL 发行版与 Disk VHDX 大小
-    Write-Host "`n[2/3 已安装 WSL 发行版资源清单]" -ForegroundColor Yellow
+    Write-Host "`n$(Get-I18nStr 'Status_Step2')" -ForegroundColor Yellow
     
     $distros = Get-WslDistros
     if ($distros.Count -eq 0) {
@@ -73,25 +73,25 @@ function Show-WslDashboard {
     Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
 
     # 3. 运维操作管理
-    Write-Host "`n[3/3 实例管理操作]" -ForegroundColor Yellow
-    Write-Host " [T] 强制终止某个指定的僵死发行版 (wsl --terminate)"
-    Write-Host " [S] 全局软重启 WSL 堆栈 (wsl --shutdown)"
+    Write-Host "`n$(Get-I18nStr 'Status_Step3')" -ForegroundColor Yellow
+    Write-Host " $(Get-I18nStr 'Status_Opt_Term')"
+    Write-Host " $(Get-I18nStr 'Status_Opt_Shutdown')"
     Write-Host " [0] $(Get-I18nStr 'Cancel_Operation')"
 
     $opChoice = Read-Host "`n$(Get-I18nStr 'Prompt_Select') [T / S / 0]"
     if ($opChoice -in 'T', 't') {
         $target = Select-WslDistro -Title $(Get-I18nStr 'Select_Distro_Title')
         if ($target) {
-            Write-Host "`nStopping $target ..." -ForegroundColor Yellow
+            Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "正在停止发行版: $target ..." } else { "Stopping $target ..." })" -ForegroundColor Yellow
             & wsl.exe --terminate $target
-            Write-Host "[✓] Terminated $target successfully." -ForegroundColor Green
+            Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { "已成功停止 $target" } else { "Terminated $target successfully." })" -ForegroundColor Green
         }
     } elseif ($opChoice -in 'S', 's') {
-        $confirm = Read-Host "`nConfirm execute global wsl --shutdown? All running WSL instances will be stopped! [Y/N]"
+        $confirm = Read-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { '确认要执行全局 wsl --shutdown 重启 WSL 吗？所有运行中的 WSL 将被关闭！[Y/N]' } else { 'Confirm execute global wsl --shutdown? All running WSL instances will be stopped! [Y/N]' })"
         if ($confirm -in 'Y', 'y') {
-            Write-Host "`nShutting down WSL ..." -ForegroundColor Red
+            Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { '正在执行全局 shutdown...' } else { 'Shutting down WSL ...' })" -ForegroundColor Red
             & wsl.exe --shutdown
-            Write-Host "[✓] Global WSL shutdown complete." -ForegroundColor Green
+            Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { '全局 WSL 堆栈已关闭重置。' } else { 'Global WSL shutdown complete.' })" -ForegroundColor Green
         }
     }
 }
