@@ -7,7 +7,8 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-# 导入公共函数组件
+# 导入多语言与公共函数组件
+. "$PSScriptRoot\components\wsl_i18n.ps1"
 . "$PSScriptRoot\components\wsl_common.ps1"
 
 # 默认基础配置
@@ -23,7 +24,7 @@ function Invoke-SubScript {
     try {
         & $ScriptBlock
     } catch {
-        Write-Host "`n[!] 执行过程中发生错误: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice'): $($_.Exception.Message)" -ForegroundColor Red
     } finally {
         Pause-Menu
     }
@@ -34,25 +35,24 @@ function Invoke-SubScript {
 # ------------------------------------------------------------------------------
 function Invoke-Install-Wrapper {
     Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host "          1. 安装 Debian WSL 发行版        " -ForegroundColor Cyan
+    Write-Host "          $(Get-I18nStr 'Install_Title')        " -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
 
-    $versionInput = Read-Host "选择 Debian 版本 (支持 12 / 13，默认 13)"
+    $versionInput = Read-Host "$(Get-I18nStr 'Install_Version_Prompt')"
     if (-not $versionInput) {
         $version = 13
     } elseif ($versionInput -in '12', '13') {
         $version = [int]$versionInput
     } else {
-        Write-Host "`n[!] 输入版本 '$versionInput' 不支持，仅支持 12 或 13，请正确输入！" -ForegroundColor Red
+        Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice')" -ForegroundColor Red
         return
     }
 
-    $wslRoot = Read-Host "输入安装根目录 (默认 $DefaultWslRoot)"
+    $wslRoot = Read-Host "$(Get-I18nStr 'Install_Dir_Prompt') (默认 $DefaultWslRoot)"
     if (-not $wslRoot) { $wslRoot = $DefaultWslRoot }
 
     $installScript = Join-Path $PSScriptRoot 'components\wsl_install.ps1'
     if (Test-Path -LiteralPath $installScript) {
-        Write-Host "`n正在调用 $installScript 进行安装..." -ForegroundColor Green
         & $installScript -Version $version -WslRoot $wslRoot
     } else {
         Write-Host "错误: 未找到组件脚本 $installScript" -ForegroundColor Red
@@ -66,9 +66,10 @@ function Show-About {
     Write-Host "`n==========================================" -ForegroundColor Cyan
     Write-Host "             关于 oneDebian WSL            " -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host " 项目描述: Debian WSL 自动化安装与运维管理工具"
+    Write-Host " 项目描述: Debian WSL 自动化安装与运维管理工具 (Automated Debian WSL Management Tool)"
     Write-Host " 作者    : Fred"
     Write-Host " 支持版本: Debian 12 (Bookworm) / Debian 13 (Trixie)"
+    Write-Host " 当前语言: $script:CurrentLang"
     Write-Host " 工具箱路径: $PSScriptRoot"
     Write-Host " 组件库路径: $PSScriptRoot\components"
     Write-Host " 默认 WSL 安装根目录: $DefaultWslRoot"
@@ -81,20 +82,21 @@ function Main {
     while ($true) {
         Clear-Host
         Write-Host "==================================================" -ForegroundColor Green
-        Write-Host "       oneDebian WSL 管理工具箱 (Windows PS)       " -ForegroundColor Green
+        Write-Host "       $(Get-I18nStr 'Menu_Title')       " -ForegroundColor Green
         Write-Host "==================================================" -ForegroundColor Green
-        Write-Host " 01. Install   - 安装 Debian WSL 发行版" -ForegroundColor Yellow
-        Write-Host " 02. Update    - 更新 系统软件包与 WSL 核心" -ForegroundColor Yellow
-        Write-Host " 03. Backup    - 备份 (导出) WSL 发行版" -ForegroundColor Yellow
-        Write-Host " 04. Restore   - 还原 (导入) WSL 发行版" -ForegroundColor Yellow
-        Write-Host " 05. Uninstall - 卸载 (注销) WSL 发行版" -ForegroundColor Yellow
-        Write-Host " 06. Config    - WSL 配置向导 (.wslconfig and wsl.conf)" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Install')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Update')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Backup')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Restore')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Uninstall')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Config')" -ForegroundColor Yellow
         Write-Host " ------------------------------------------------"
-        Write-Host " 99. About     - 关于工具箱"
-        Write-Host " 00. Exit      - 退出程序"
+        Write-Host " $(Get-I18nStr 'Menu_Lang')" -ForegroundColor Cyan
+        Write-Host " $(Get-I18nStr 'Menu_About')"
+        Write-Host " $(Get-I18nStr 'Menu_Exit')"
         Write-Host "==================================================" -ForegroundColor Green
 
-        $choice = Read-Host "`n请输入功能编号 [01-06, 99, 00]"
+        $choice = Read-Host "`n$(Get-I18nStr 'Prompt_Select')"
 
         switch ($choice) {
             { $_ -in '01', '1' }  { Invoke-SubScript { Invoke-Install-Wrapper } }
@@ -103,14 +105,14 @@ function Main {
             { $_ -in '04', '4' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_restore.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '05', '5' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_uninstall.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '06', '6' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_config.ps1" -DefaultWslRoot $DefaultWslRoot } }
+            { $_ -in 'L', 'l' }   { Toggle-Language }
             { $_ -in '99' }       { Show-About; Pause-Menu }
-            { $_ -in '00', '0', 'exit' } { Write-Host "`n已退出工具箱。 Bye!" -ForegroundColor Gray; exit }
+            { $_ -in '00', '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }
             default {
-                Write-Host "`n[!] 输入未匹配到有效选项，请正确输入！" -ForegroundColor Red
+                Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice')" -ForegroundColor Red
                 Start-Sleep -Seconds 1.5
             }
         }
-
     }
 }
 
