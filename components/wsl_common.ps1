@@ -6,11 +6,14 @@
 function Get-WslDistros {
     $rawList = & wsl.exe --list --quiet 2>$null
     if (-not $rawList) { return @() }
-    
+
+    # 彻底清洗 UTF-16LE 产生的 NUL (`\0`) 字符，防止名字被截断成首字母 (如 debian-12 被截成 d)
+    $fullText = [string]::Join("`n", $rawList) -replace "`0", ""
+
     $distros = @(
-        $rawList | ForEach-Object { $_ -replace "`0", "" } |
+        $fullText -split "`r?`n" |
             ForEach-Object { $_.Trim() } |
-            Where-Object { $_ }
+            Where-Object { $_ -and $_ -notmatch '^\s*$' -and $_ -ne 'NAME' }
     )
     return $distros
 }
