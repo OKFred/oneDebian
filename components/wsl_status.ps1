@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_status.ps1
-# Description: 07. WSL 运维诊断与实例状态仪表盘
+# Description: 07. WSL 运维诊断与实例状态仪表盘 (支持 i18n 多语言)
 # ==============================================================================
 
 param(
@@ -12,7 +12,7 @@ param(
 
 function Show-WslDashboard {
     Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host "     7. WSL 运维诊断与实例状态仪表盘      " -ForegroundColor Cyan
+    Write-Host "     $(Get-I18nStr 'Status_Title')      " -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
 
     # 1. 读取 WSL 核心环境信息
@@ -20,9 +20,9 @@ function Show-WslDashboard {
     $wslVerRaw = & wsl.exe --version 2>$null
     if ($LASTEXITCODE -eq 0 -and $wslVerRaw) {
         $firstLine = ($wslVerRaw | Select-Object -First 1) -replace "`0", ""
-        Write-Host "  • WSL 核心服务: 正常运行 ($firstLine)" -ForegroundColor Green
+        Write-Host "  • WSL Service Status: Normal ($firstLine)" -ForegroundColor Green
     } else {
-        Write-Host "  • WSL 核心服务: 已安装 (传统 Windows WSL 模块)" -ForegroundColor Gray
+        Write-Host "  • WSL Service Status: Installed" -ForegroundColor Gray
     }
 
     # 2. 读取所有已安装的 WSL 发行版与 Disk VHDX 大小
@@ -30,20 +30,19 @@ function Show-WslDashboard {
     
     $distros = Get-WslDistros
     if ($distros.Count -eq 0) {
-        Write-Host "  未检测到任何已安装的 WSL 发行版。" -ForegroundColor Red
+        Write-Host "  $(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
         return
     }
 
     $verboseList = & wsl.exe --list --verbose 2>$null
 
     Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
-    Write-Host "  序号  |  发行版名称    |  状态 (State)  |  WSL 版本  |  vhdx 物理镜像大小 " -ForegroundColor Cyan
+    Write-Host "$(Get-I18nStr 'Status_Header')" -ForegroundColor Cyan
     Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
 
     for ($i = 0; $i -lt $distros.Count; $i++) {
         $name = $distros[$i]
         
-        # 获取状态
         $state = "Stopped"
         $wslVer = "2"
         if ($verboseList) {
@@ -57,13 +56,7 @@ function Show-WslDashboard {
             }
         }
 
-        # 计算 vhdx 大小
-        $vhdxSizeStr = "未查找到文件"
-        $possiblePaths = @(
-            (Join-Path $DefaultWslRoot "$name\ext4.vhdx"),
-            "$env:LOCALAPPDATA\Packages\*$name*\LocalState\ext4.vhdx"
-        )
-        
+        $vhdxSizeStr = "N/A"
         $foundFile = $null
         if (Test-Path -LiteralPath (Join-Path $DefaultWslRoot "$name\ext4.vhdx")) {
             $foundFile = Get-Item -LiteralPath (Join-Path $DefaultWslRoot "$name\ext4.vhdx")
@@ -83,22 +76,22 @@ function Show-WslDashboard {
     Write-Host "`n[3/3 实例管理操作]" -ForegroundColor Yellow
     Write-Host " [T] 强制终止某个指定的僵死发行版 (wsl --terminate)"
     Write-Host " [S] 全局软重启 WSL 堆栈 (wsl --shutdown)"
-    Write-Host " [0] 返回主菜单"
+    Write-Host " [0] $(Get-I18nStr 'Cancel_Operation')"
 
-    $opChoice = Read-Host "`n请输入操作选项 [T / S / 0]"
+    $opChoice = Read-Host "`n$(Get-I18nStr 'Prompt_Select') [T / S / 0]"
     if ($opChoice -in 'T', 't') {
-        $target = Select-WslDistro -Title "选择要终止进程的 WSL 发行版"
+        $target = Select-WslDistro -Title $(Get-I18nStr 'Select_Distro_Title')
         if ($target) {
-            Write-Host "`n正在停止发行版 $target ..." -ForegroundColor Yellow
+            Write-Host "`nStopping $target ..." -ForegroundColor Yellow
             & wsl.exe --terminate $target
-            Write-Host "[✓] 已成功停止 $target" -ForegroundColor Green
+            Write-Host "[✓] Terminated $target successfully." -ForegroundColor Green
         }
     } elseif ($opChoice -in 'S', 's') {
-        $confirm = Read-Host "`n确认要执行全局 wsl --shutdown 重启 WSL 吗？所有运行中的 WSL 将被关闭！[Y/N]"
+        $confirm = Read-Host "`nConfirm execute global wsl --shutdown? All running WSL instances will be stopped! [Y/N]"
         if ($confirm -in 'Y', 'y') {
-            Write-Host "`n正在执行全局 shutdown..." -ForegroundColor Red
+            Write-Host "`nShutting down WSL ..." -ForegroundColor Red
             & wsl.exe --shutdown
-            Write-Host "[✓] 全局 WSL 堆栈已关闭重置。" -ForegroundColor Green
+            Write-Host "[✓] Global WSL shutdown complete." -ForegroundColor Green
         }
     }
 }

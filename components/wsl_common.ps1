@@ -15,38 +15,41 @@ function Get-WslDistros {
     return $distros
 }
 
-function Pause-Menu {
-    Write-Host "`nPress any key to return to menu... (按任意键返回主菜单)" -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-}
-
 function Select-WslDistro {
-    param([string]$Title = "请选择 WSL 发行版")
+    param(
+        [string]$Title = $(Get-I18nStr 'Select_Distro_Title')
+    )
 
     $distros = Get-WslDistros
     if ($distros.Count -eq 0) {
-        Write-Host "未检测到任何已安装的 WSL 发行版。" -ForegroundColor Red
+        Write-Host "`n[!] $(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
         return $null
     }
 
     Write-Host "`n=== $Title ===" -ForegroundColor Cyan
     for ($i = 0; $i -lt $distros.Count; $i++) {
-        Write-Host " [$($i + 1)] $($distros[$i])" -ForegroundColor Yellow
+        Write-Host " [$($i + 1)] $($distros[$i])"
     }
-    Write-Host " [0] 取消操作" -ForegroundColor Gray
 
-    $choice = Read-Host "`n请输入序号 [1-$($distros.Count)]"
-    if ($choice -eq '0') { return $null }
-
-    if ([int]::TryParse($choice, [ref]$null)) {
-        $idx = [int]$choice
-        if ($idx -ge 1 -and $idx -le $distros.Count) {
-            return $distros[$idx - 1]
+    while ($true) {
+        $inputVal = Read-Host "`n$(Get-I18nStr 'Select_Index_Prompt') [1-$($distros.Count)] (输入 0 取消)"
+        if ($inputVal -eq '0') {
+            Write-Host "$(Get-I18nStr 'Cancel_Operation')" -ForegroundColor Gray
+            return $null
         }
+
+        if ($inputVal -match '^\d+$') {
+            $index = [int]$inputVal - 1
+            if ($index -ge 0 -and $index -lt $distros.Count) {
+                return $distros[$index]
+            }
+        }
+
+        Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice')" -ForegroundColor Red
     }
+}
 
-    Write-Host "`n[!] 输入 '$choice' 未匹配到有效选项，请正确输入！" -ForegroundColor Red
-    Start-Sleep -Seconds 1
-    return $null
-
+function Pause-Menu {
+    Write-Host "`n$(Get-I18nStr 'Msg_Pause')" -ForegroundColor Gray
+    $null = [Console]::ReadKey($true)
 }
