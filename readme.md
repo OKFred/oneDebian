@@ -36,7 +36,9 @@ cd oneDebian
 
 ##### PowerShell 菜单功能预览 (`menu.ps1`)
 
+- **00. Precheck (安装前预检)**：自动化排查 CPU 硬件虚拟化 (VT-x/AMD-V) 开启状态、Windows 虚拟机平台功能、WSL2 命令行连通性与磁盘可用空间，并提供一键修复指导。
 - **01. Install (安装)**：自动下载官方 rootfs，导入安装指定版本 (Debian 12/13) 的 WSL 发行版。
+
 - **02. Update (更新)**：更新指定 WSL Debian 的 `apt` 软件包或更新 Windows `wsl --update` 核心。
 - **03. Backup (备份)**：将指定 WSL 发行版导出备份为 `.tar` 镜像文件。
 - **04. Restore (还原)**：从 `.tar` 或 `.vhdx` 备份镜像还原/导入为新的 WSL 发行版。
@@ -95,7 +97,9 @@ cd oneDebian
 
 ##### PowerShell Menu Features Overview (`menu.ps1`)
 
+- **00. Precheck**: Pre-install environment check & diagnostic. Checks CPU hardware virtualization (VT-x/AMD-V), Windows `VirtualMachinePlatform` features, WSL2 default version, and disk free space with one-click fix guidance.
 - **01. Install**: Automatically downloads official rootfs and imports requested Debian WSL (12 / 13).
+
 - **02. Update**: Update `apt` packages inside WSL or update Windows `wsl --update` core.
 - **03. Backup**: Export and backup specified WSL distro to `.tar` archive.
 - **04. Restore**: Import and restore WSL distro from `.tar` or `.vhdx` backups.
@@ -140,7 +144,9 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 - `components/` - 工具箱核心功能组件目录 / Toolbox Core Components
   - `wsl_common.ps1` - WSL 通用辅助函数库 / Common Helper Functions
   - `wsl_i18n.ps1` - 多语言 (i18n) 字典与切换库 / Multi-language Dictionary Module
+  - `wsl_check.ps1` - WSL 安装前环境预检与虚拟化诊断脚本 / Pre-install Check & Virtualization Diagnostic
   - `wsl_install.ps1` - WSL 自动化安装脚本 / WSL Automated Installer
+
   - `wsl_update.ps1` - WSL 系统与核心更新脚本 / WSL & System Updater
   - `wsl_backup.ps1` - WSL 发行版导出备份脚本 / WSL Distro Backup Script
   - `wsl_restore.ps1` - WSL 发行版导入还原脚本 / WSL Distro Restore Script

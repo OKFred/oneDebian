@@ -84,6 +84,7 @@ function Main {
         Write-Host "==================================================" -ForegroundColor Green
         Write-Host "       $(Get-I18nStr 'Menu_Title')       " -ForegroundColor Green
         Write-Host "==================================================" -ForegroundColor Green
+        Write-Host " $(Get-I18nStr 'Menu_Check')" -ForegroundColor Cyan
         Write-Host " $(Get-I18nStr 'Menu_Install')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Update')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Backup')" -ForegroundColor Yellow
@@ -101,6 +102,7 @@ function Main {
         $choice = Read-Host "`n$(Get-I18nStr 'Prompt_Select')"
 
         switch ($choice) {
+            { $_ -in '00' }       { Invoke-SubScript { & "$PSScriptRoot\components\wsl_check.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '01', '1' }  { Invoke-SubScript { Invoke-Install-Wrapper } }
             { $_ -in '02', '2' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_update.ps1" } }
             { $_ -in '03', '3' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_backup.ps1" -DefaultWslRoot $DefaultWslRoot } }
@@ -111,12 +113,13 @@ function Main {
             { $_ -in '08', '8' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_purge.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in 'L', 'l' }   { Toggle-Language }
             { $_ -in '99' }       { Show-About; Pause-Menu }
-            { [string]::IsNullOrWhiteSpace($_) -or $_ -in '00', '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }
+            { [string]::IsNullOrWhiteSpace($_) -or $_ -in '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }
             default {
                 Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice')" -ForegroundColor Red
                 Start-Sleep -Seconds 1.5
             }
         }
+
 
 
 

@@ -13,6 +13,7 @@ if (-not $script:CurrentLang) {
 $script:I18nDict = @{
     # 主菜单
     'Menu_Title'             = @{ 'zh-CN' = 'oneDebian WSL 管理工具箱 (Windows PS)'; 'en-US' = 'oneDebian WSL Management Toolbox (Windows PS)' }
+    'Menu_Check'             = @{ 'zh-CN' = '00. Precheck  - WSL 安装前环境预检与虚拟化诊断'; 'en-US' = '00. Precheck  - Pre-install Environment Check & Virtualization Diagnostic' }
     'Menu_Install'           = @{ 'zh-CN' = '01. Install   - 安装 Debian WSL 发行版'; 'en-US' = '01. Install   - Install Debian WSL Distribution' }
     'Menu_Update'            = @{ 'zh-CN' = '02. Update    - 更新 系统软件包与 WSL 核心'; 'en-US' = '02. Update    - Update System Packages & WSL Core' }
     'Menu_Backup'            = @{ 'zh-CN' = '03. Backup    - 备份 (导出) WSL 发行版'; 'en-US' = '03. Backup    - Export/Backup WSL Distribution' }
@@ -23,11 +24,10 @@ $script:I18nDict = @{
     'Menu_Purge'             = @{ 'zh-CN' = '08. Purge      - WSL 环境全量彻底清理 (Full Purge)'; 'en-US' = '08. Purge      - Full WSL Environment Purge & Reset' }
 
     'Menu_Lang'              = @{ 'zh-CN' = 'L.  Language  - 切换界面语言 (Language)'; 'en-US' = 'L.  Language  - Switch Display Language' }
-
     'Menu_About'             = @{ 'zh-CN' = '99. About     - 关于工具箱'; 'en-US' = '99. About     - About Toolbox' }
-    'Menu_Exit'              = @{ 'zh-CN' = '00. Exit      - 退出程序 (直接按回车 或 00)'; 'en-US' = '00. Exit      - Exit Toolbox (Direct Enter or 00)' }
+    'Menu_Exit'              = @{ 'zh-CN' = '0.  Exit      - 退出程序 (直接按回车 或 0)'; 'en-US' = '0.  Exit      - Exit Toolbox (Direct Enter or 0)' }
+    'Prompt_Select'          = @{ 'zh-CN' = '请输入功能编号 [00-08, L, 99, 0]'; 'en-US' = 'Please enter option number [00-08, L, 99, 0]' }
 
-    'Prompt_Select'          = @{ 'zh-CN' = '请输入功能编号 [01-08, L, 99, 00]'; 'en-US' = 'Please enter option number [01-08, L, 99, 00]' }
 
     'Err_InvalidChoice'      = @{ 'zh-CN' = '[!] 输入未匹配到有效选项，请正确输入！'; 'en-US' = '[!] Unmatched option, please enter a valid choice!' }
     'Msg_Pause'              = @{ 'zh-CN' = 'Press any key to return to menu... (按任意键返回主菜单)'; 'en-US' = 'Press any key to return to menu...' }
