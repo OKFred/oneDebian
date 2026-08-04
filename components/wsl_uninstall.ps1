@@ -16,7 +16,8 @@ function Invoke-WslUninstall {
     Write-Host "     $(Get-I18nStr 'Uninstall_Title')    " -ForegroundColor Red
     Write-Host "==========================================" -ForegroundColor Red
 
-    $distros = Get-WslDistros
+    $distros = @(Get-WslDistros)
+
     if ($distros.Count -eq 0) {
         Write-Host "`n$(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
         return

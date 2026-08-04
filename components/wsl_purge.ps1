@@ -16,7 +16,8 @@ function Invoke-WslPurge {
     Write-Host "     $(Get-I18nStr 'Purge_Title')        " -ForegroundColor Red
     Write-Host "==========================================" -ForegroundColor Red
 
-    $distros = Get-WslDistros
+    $distros = @(Get-WslDistros)
+
     $archiveDir = Join-Path $DefaultWslRoot 'images'
     $backupDir = Join-Path $DefaultWslRoot 'backups'
 
