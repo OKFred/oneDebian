@@ -73,8 +73,10 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 - `install-via-wsl.ps1` - WSL 快捷安装代理脚本
 - `components/` - 工具箱核心功能组件目录
   - `wsl_common.ps1` - WSL 通用辅助函数库
-  - `wsl_i18n.ps1` - 多语言 (i18n) 字典与切换库
+  - `wsl_i18n.ps1` - 多语言 (i18n) 动态 JSON 语言包加载器
+  - `locales/` - 多语言 JSON 字典目录 (`zh-CN.json`, `en-US.json`)
   - `wsl_check.ps1` - WSL 安装前环境预检与虚拟化诊断脚本
+
   - `wsl_install.ps1` - WSL 自动化安装脚本
   - `wsl_update.ps1` - WSL 系统与核心更新脚本
   - `wsl_backup.ps1` - WSL 发行版导出备份脚本

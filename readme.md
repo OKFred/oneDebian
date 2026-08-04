@@ -73,8 +73,10 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 - `install-via-wsl.ps1` - WSL Quick Installer Forwarder Script
 - `components/` - Core Feature Component Directory
   - `wsl_common.ps1` - Common Helper Functions
-  - `wsl_i18n.ps1` - Multi-language Dictionary Module
+  - `wsl_i18n.ps1` - Multi-language (i18n) Dynamic JSON Loader
+  - `locales/` - Locale JSON Dictionaries (`zh-CN.json`, `en-US.json`)
   - `wsl_check.ps1` - Pre-install Check & Virtualization Diagnostic Script
+
   - `wsl_install.ps1` - WSL Automated Installer
   - `wsl_update.ps1` - WSL & System Packages Updater
   - `wsl_backup.ps1` - WSL Distro Backup & Export Script

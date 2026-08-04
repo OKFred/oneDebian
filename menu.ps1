@@ -69,7 +69,8 @@ function Show-About {
     Write-Host " 项目描述: Debian WSL 自动化安装与运维管理工具 (Automated Debian WSL Management Tool)"
     Write-Host " 作者    : Fred"
     Write-Host " 支持版本: Debian 12 (Bookworm) / Debian 13 (Trixie)"
-    Write-Host " 当前语言: $script:CurrentLang"
+    Write-Host " 当前语言: $global:CurrentLang"
+
     Write-Host " 工具箱路径: $PSScriptRoot"
     Write-Host " 组件库路径: $PSScriptRoot\components"
     Write-Host " 默认 WSL 安装根目录: $DefaultWslRoot"
