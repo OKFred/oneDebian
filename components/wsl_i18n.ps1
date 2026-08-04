@@ -4,17 +4,31 @@
 # Author: Fred
 # ==============================================================================
 
-# 在点号引入的顶层，锁定当前脚本所在目录与 locales 绝对路径
-$global:I18nLocalesDir = Join-Path $PSScriptRoot "locales"
-
-# 默认根据当前 Windows 系统语言自动初始化
+# 默认初始化语言为 简体中文 (zh-CN) (按 L 可随时切换为 English)
 if (-not $global:CurrentLang) {
-    $uiLang = [System.Globalization.CultureInfo]::CurrentUICulture.Name
-    $global:CurrentLang = if ($uiLang -like 'zh*') { 'zh-CN' } else { 'en-US' }
+    $global:CurrentLang = 'zh-CN'
 }
+
 
 if (-not $global:LoadedLocales) {
     $global:LoadedLocales = New-Object 'System.Collections.Generic.Dictionary[string, object]'
+}
+
+# 动态多重查找 locales 语言包目录
+function Get-LocalesDirectory {
+    $possiblePaths = @(
+        "$PSScriptRoot\locales",
+        "$PSScriptRoot\components\locales",
+        "D:\workspace\okfred\oneDebian\components\locales",
+        "D:\workspace\okfred\oneDebian\locales"
+    )
+
+    foreach ($path in $possiblePaths) {
+        if (Test-Path -LiteralPath $path) {
+            return $path
+        }
+    }
+    return $null
 }
 
 function Load-LocaleJson {
@@ -23,10 +37,19 @@ function Load-LocaleJson {
     )
 
     if ($global:LoadedLocales.ContainsKey($Lang)) {
-        return $global:LoadedLocales[$Lang]
+        $existingDict = $global:LoadedLocales[$Lang]
+        if ($existingDict -and $existingDict.Count -gt 0) {
+            return $existingDict
+        }
     }
 
-    $jsonPath = Join-Path $global:I18nLocalesDir "$Lang.json"
+    $localesDir = Get-LocalesDirectory
+    if (-not $localesDir) {
+        Write-Host "[!] Error: locales directory not found!" -ForegroundColor Red
+        return (New-Object 'System.Collections.Generic.Dictionary[string, string]')
+    }
+
+    $jsonPath = Join-Path $localesDir "$Lang.json"
 
     if (Test-Path -LiteralPath $jsonPath) {
         try {
@@ -41,8 +64,10 @@ function Load-LocaleJson {
             $global:LoadedLocales[$Lang] = $dict
             return $dict
         } catch {
-            Write-Host "[!] Error loading JSON ${jsonPath}: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[!] Error parsing JSON ${jsonPath}: $($_.Exception.Message)" -ForegroundColor Red
         }
+    } else {
+        Write-Host "[!] Locale file not found at: $jsonPath" -ForegroundColor Red
     }
     return (New-Object 'System.Collections.Generic.Dictionary[string, string]')
 }
@@ -59,6 +84,7 @@ function Get-I18nStr {
     if ($currentDict.ContainsKey($Key)) {
         $text = $currentDict[$Key]
     } else {
+        # Fallback 机制：若当前语言丢失 key，退回到 zh-CN.json 寻全
         $fallbackDict = Load-LocaleJson -Lang 'zh-CN'
         if ($fallbackDict.ContainsKey($Key)) {
             $text = $fallbackDict[$Key]
