@@ -4,15 +4,17 @@
 # Author: Fred
 # ==============================================================================
 
-# 默认根据当前 Windows 系统语言自动初始化 (提升为 $global 作用域以跨子脚本保持同步)
+# 在点号引入的顶层，锁定当前脚本所在目录与 locales 绝对路径
+$global:I18nLocalesDir = Join-Path $PSScriptRoot "locales"
+
+# 默认根据当前 Windows 系统语言自动初始化
 if (-not $global:CurrentLang) {
     $uiLang = [System.Globalization.CultureInfo]::CurrentUICulture.Name
     $global:CurrentLang = if ($uiLang -like 'zh*') { 'zh-CN' } else { 'en-US' }
 }
 
-# 内存中缓存解析好的 JSON 语言包
 if (-not $global:LoadedLocales) {
-    $global:LoadedLocales = @{}
+    $global:LoadedLocales = New-Object 'System.Collections.Generic.Dictionary[string, object]'
 }
 
 function Load-LocaleJson {
@@ -24,25 +26,25 @@ function Load-LocaleJson {
         return $global:LoadedLocales[$Lang]
     }
 
-    $jsonPath = Join-Path $PSScriptRoot "locales\$Lang.json"
+    $jsonPath = Join-Path $global:I18nLocalesDir "$Lang.json"
+
     if (Test-Path -LiteralPath $jsonPath) {
         try {
             $rawJson = Get-Content -LiteralPath $jsonPath -Raw -Encoding UTF8
             $jsonObject = $rawJson | ConvertFrom-Json
             
-            # 转为 PowerShell 哈希表
-            $dict = @{}
+            $dict = New-Object 'System.Collections.Generic.Dictionary[string, string]'
             foreach ($prop in $jsonObject.PSObject.Properties) {
-                $dict[$prop.Name] = $prop.Value
+                $dict[$prop.Name] = [string]$prop.Value
             }
 
             $global:LoadedLocales[$Lang] = $dict
             return $dict
         } catch {
-            Write-Host "[!] Failed to parse locale JSON '$jsonPath': $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[!] Error loading JSON ${jsonPath}: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
-    return @{}
+    return (New-Object 'System.Collections.Generic.Dictionary[string, string]')
 }
 
 function Get-I18nStr {
@@ -57,7 +59,6 @@ function Get-I18nStr {
     if ($currentDict.ContainsKey($Key)) {
         $text = $currentDict[$Key]
     } else {
-        # Fallback 机制：若当前语言丢失 key，退回到 zh-CN.json 寻全
         $fallbackDict = Load-LocaleJson -Lang 'zh-CN'
         if ($fallbackDict.ContainsKey($Key)) {
             $text = $fallbackDict[$Key]
@@ -66,7 +67,7 @@ function Get-I18nStr {
         }
     }
 
-    if ($Args.Count -gt 0) {
+    if ($Args.Count -gt 0 -and $text) {
         return [string]::Format($text, $Args)
     }
     return $text
