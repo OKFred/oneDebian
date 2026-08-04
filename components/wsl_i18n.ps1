@@ -25,7 +25,8 @@ $script:I18nDict = @{
     'Menu_Lang'              = @{ 'zh-CN' = 'L.  Language  - 切换界面语言 (Language)'; 'en-US' = 'L.  Language  - Switch Display Language' }
 
     'Menu_About'             = @{ 'zh-CN' = '99. About     - 关于工具箱'; 'en-US' = '99. About     - About Toolbox' }
-    'Menu_Exit'              = @{ 'zh-CN' = '00. Exit      - 退出程序'; 'en-US' = '00. Exit      - Exit Toolbox' }
+    'Menu_Exit'              = @{ 'zh-CN' = '00. Exit      - 退出程序 (直接按回车 或 00)'; 'en-US' = '00. Exit      - Exit Toolbox (Direct Enter or 00)' }
+
     'Prompt_Select'          = @{ 'zh-CN' = '请输入功能编号 [01-08, L, 99, 00]'; 'en-US' = 'Please enter option number [01-08, L, 99, 00]' }
 
     'Err_InvalidChoice'      = @{ 'zh-CN' = '[!] 输入未匹配到有效选项，请正确输入！'; 'en-US' = '[!] Unmatched option, please enter a valid choice!' }

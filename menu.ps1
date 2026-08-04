@@ -111,12 +111,13 @@ function Main {
             { $_ -in '08', '8' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_purge.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in 'L', 'l' }   { Toggle-Language }
             { $_ -in '99' }       { Show-About; Pause-Menu }
-            { $_ -in '00', '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }
+            { [string]::IsNullOrWhiteSpace($_) -or $_ -in '00', '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }
             default {
                 Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice')" -ForegroundColor Red
                 Start-Sleep -Seconds 1.5
             }
         }
+
 
 
     }
