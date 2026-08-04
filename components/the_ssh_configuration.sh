@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description: 用于SSH初始化
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-24
 
 #文件依赖

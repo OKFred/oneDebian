@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  检测linux系统发行版本(意义不大，纯粹练手)
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-16
 
 #dependencies--文件依赖

@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description: 获取当前运行的内核版本
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2024-05-19
 
 the_unused_image_removal() {

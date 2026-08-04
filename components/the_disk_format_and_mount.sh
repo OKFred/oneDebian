@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  磁盘格式化&挂载：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2024-01-11
 
 #dependencies--文件依赖

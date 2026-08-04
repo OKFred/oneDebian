@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  安装docker、portainer.io、registry：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-17
 
 #dependencies--文件依赖

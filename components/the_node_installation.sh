@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  安装nvm、NodeJS、npm：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-16
 
 #dependencies--文件依赖

@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  使用docker进行本地构建、拉取、推送等：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-20
 
 #dependencies--文件依赖

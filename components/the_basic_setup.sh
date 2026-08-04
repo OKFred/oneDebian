@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  安装基础工具：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-24
 
 #dependencies--文件依赖

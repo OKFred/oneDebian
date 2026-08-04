@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description: 菜单化显示工具箱列表
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-24
 
 #文件依赖

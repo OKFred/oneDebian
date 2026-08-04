@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  安装cockpit：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-17
 
 #dependencies--文件依赖

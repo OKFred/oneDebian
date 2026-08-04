@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description:  项目初始化：
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-20
 
 #dependencies--文件依赖

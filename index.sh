@@ -1,6 +1,6 @@
 #!/bin/bash
 #@description: 用于Ubuntu/Debian服务器初始化
-#@author: Fred Zhang Qi
+#@author: Fred
 #@datetime: 2023-12-16
 
 #文件依赖
