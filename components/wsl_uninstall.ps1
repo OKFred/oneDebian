@@ -1,6 +1,7 @@
 ﻿# ==============================================================================
 # components/wsl_uninstall.ps1
-# Description: 05. 卸载 (注销) WSL 发行版 (支持 i18n 多语言)
+# Description: 05. 卸载 (注销) WSL 发行版 (单次 Y/N 确认，防误输入)
+# Author: Fred
 # ==============================================================================
 
 param(
@@ -46,32 +47,26 @@ function Invoke-WslUninstall {
         return
     }
 
-    # 1/2 第一次确认
+    # 确认注销（单次 Y/N 确认）
     Write-Host "`n$(Get-I18nStr 'Uninstall_Warn_Step1')" -ForegroundColor Red
     foreach ($d in $targetDistros) { Write-Host "  • $d" -ForegroundColor Yellow }
 
-    $confirm1 = Read-Host "`n$(Get-I18nStr 'Uninstall_Confirm_Step1')"
-    if ($confirm1 -ne 'Y' -and $confirm1 -ne 'y') {
-        Write-Host "$(Get-I18nStr 'Cancel_Operation')" -ForegroundColor Gray
-        return
-    }
-
-    # 2/2 第二次确认
-    $confirm2 = Read-Host "`n$(Get-I18nStr 'Uninstall_Confirm_Step2')"
-    if ($confirm2 -ne 'DELETE') {
-        Write-Host "`n[!] 二次确认未通过，卸载注销操作已安全取消。" -ForegroundColor Yellow
+    $confirm = Read-Host "`n确认要卸载注销上述 WSL 发行版吗？[Y/N]"
+    if ($confirm -ne 'Y' -and $confirm -ne 'y') {
+        Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
         return
     }
 
     # 执行卸载
     foreach ($name in $targetDistros) {
         Write-Host "`n正在注销 WSL 发行版: $name ..." -ForegroundColor Red
-        & wsl.exe --unregister $name
+        & wsl.exe --unregister $name 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "[✓] 已成功注销 $name" -ForegroundColor Green
             $localDir = Join-Path $DefaultWslRoot $name
             if (Test-Path -LiteralPath $localDir) {
-                Write-Host "提示: 本地残留数据文件夹依然保留在: $localDir (可手动删除)" -ForegroundColor Yellow
+                Write-Host "提示: 本地残留数据文件夹已物理清除: $localDir" -ForegroundColor Yellow
+                Remove-Item -LiteralPath $localDir -Recurse -Force 2>$null
             }
         } else {
             Write-Host "[!] 注销 $name 失败！" -ForegroundColor Red

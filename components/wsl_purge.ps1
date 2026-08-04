@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_purge.ps1
-# Description: 08. WSL 环境全量彻底清理与重置 (100% 全量双语 i18n 兼容)
+# Description: 08. WSL 环境全量彻底清理与重置 (单次 Y/N 确认，防误输入)
 # Author: Fred
 # ==============================================================================
 
@@ -54,7 +54,7 @@ function Invoke-WslPurge {
         return
     }
 
-    # 1/2 第一次确认
+    # 确认清理（单次 Y/N 确认）
     Write-Host "`n==========================================" -ForegroundColor Red
     Write-Host "       $(Get-I18nStr 'Purge_Warn')       " -ForegroundColor Red
     Write-Host "==========================================" -ForegroundColor Red
@@ -70,16 +70,9 @@ function Invoke-WslPurge {
         Write-Host "   • $(Get-I18nStr 'Purge_Delete_Backups'): $backupDir" -ForegroundColor Yellow
     }
 
-    $confirm1 = Read-Host "`n$(Get-I18nStr 'Purge_Confirm_Step1')"
-    if ($confirm1 -ne 'Y' -and $confirm1 -ne 'y') {
+    $confirm = Read-Host "`n$(Get-I18nStr 'Purge_Confirm_Step1')"
+    if ($confirm -ne 'Y' -and $confirm -ne 'y') {
         Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
-        return
-    }
-
-    # 2/2 第二次确认
-    $confirm2 = Read-Host "`n$(Get-I18nStr 'Purge_Confirm_Step2')"
-    if ($confirm2 -ne 'PURGE') {
-        Write-Host "`n[!] $(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Yellow
         return
     }
 
