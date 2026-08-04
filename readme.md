@@ -32,7 +32,9 @@ cd oneDebian
 - **03. Backup (备份)**：将指定 WSL 发行版导出备份为 `.tar` 镜像文件。
 - **04. Restore (还原)**：从 `.tar` 或 `.vhdx` 备份镜像还原/导入为新的 WSL 发行版。
 - **05. Uninstall (卸载)**：支持单选或批量全选 (All) 卸载注销 WSL 发行版，带有双重确认 (输入 `DELETE`) 防误删保护，并提示清理本地残留目录。
-- **06. Config (配置向导)**：引导配置全局 `~/.wslconfig` 与单发行版 `/etc/wsl.conf`。基于微软官方标准默认值，提供彩色 Git Diff 对比预览，并针对多分发 Node.js 开发 (如 7001 端口) 提供 `localhostForwarding` 端口隔离专项配置。
+- **06. Config (配置向导)**：引导配置全局 `~/.wslconfig` 与单分发 `/etc/wsl.conf`。基于微软官方标准默认值，提供彩色 Git Diff 对比预览，并针对多分发 Node.js 开发 (如 7001 端口) 提供 `localhostForwarding` 端口隔离专项配置。
+- **07. Status (运维诊断)**：格式化仪表盘实时查看所有 WSL 实例状态、内存与 `.vhdx` 物理磁盘路径与大小，支持健康度诊断与进程杀死。
+- **08. Compact (全量磁盘清理瘦身)**：全量扫描清理并紧凑化压缩所有 WSL 相关的物理虚拟磁盘空间。带有双重安全确认 (输入 `COMPACT`)，自动化调用 `fstrim` + `diskpart` 向宿主机直接归还数 GB 至数十 GB 物理空间。
 
 ---
 
@@ -74,5 +76,8 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
   - `wsl_restore.ps1` - WSL 发行版导入还原脚本
   - `wsl_uninstall.ps1` - WSL 发行版注销卸载脚本
   - `wsl_config.ps1` - WSL 全局与单分发配置向导脚本
+  - `wsl_status.ps1` - WSL 运维诊断与实例管理脚本
+  - `wsl_compact.ps1` - 全量 WSL 磁盘清理与物理容量压缩瘦身脚本
   - `*.sh` - Linux Bash 下的各项运维安装子组件
+
 

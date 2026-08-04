@@ -90,6 +90,8 @@ function Main {
         Write-Host " $(Get-I18nStr 'Menu_Restore')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Uninstall')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Config')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Status')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Compact')" -ForegroundColor Yellow
         Write-Host " ------------------------------------------------"
         Write-Host " $(Get-I18nStr 'Menu_Lang')" -ForegroundColor Cyan
         Write-Host " $(Get-I18nStr 'Menu_About')"
@@ -105,6 +107,8 @@ function Main {
             { $_ -in '04', '4' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_restore.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '05', '5' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_uninstall.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '06', '6' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_config.ps1" -DefaultWslRoot $DefaultWslRoot } }
+            { $_ -in '07', '7' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_status.ps1" -DefaultWslRoot $DefaultWslRoot } }
+            { $_ -in '08', '8' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_compact.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in 'L', 'l' }   { Toggle-Language }
             { $_ -in '99' }       { Show-About; Pause-Menu }
             { $_ -in '00', '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }
@@ -113,6 +117,7 @@ function Main {
                 Start-Sleep -Seconds 1.5
             }
         }
+
     }
 }
 

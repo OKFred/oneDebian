@@ -19,10 +19,14 @@ $script:I18nDict = @{
     'Menu_Restore'           = @{ 'zh-CN' = '04. Restore   - 还原 (导入) WSL 发行版'; 'en-US' = '04. Restore   - Import/Restore WSL Distribution' }
     'Menu_Uninstall'         = @{ 'zh-CN' = '05. Uninstall - 卸载 (注销) WSL 发行版'; 'en-US' = '05. Uninstall - Unregister/Uninstall WSL Distribution' }
     'Menu_Config'            = @{ 'zh-CN' = '06. Config    - WSL 配置向导 (.wslconfig & wsl.conf)'; 'en-US' = '06. Config    - WSL Config Helper (.wslconfig & wsl.conf)' }
+    'Menu_Status'            = @{ 'zh-CN' = '07. Status    - WSL 运维诊断与实例管理'; 'en-US' = '07. Status    - WSL Diagnostics & Instance Status' }
+    'Menu_Compact'           = @{ 'zh-CN' = '08. Compact   - vhdx 磁盘物理瘦身与空间压缩'; 'en-US' = '08. Compact   - vhdx Disk Shrinker & Compact' }
     'Menu_Lang'              = @{ 'zh-CN' = 'L.  Language  - 切换界面语言 (Language)'; 'en-US' = 'L.  Language  - Switch Display Language' }
+
     'Menu_About'             = @{ 'zh-CN' = '99. About     - 关于工具箱'; 'en-US' = '99. About     - About Toolbox' }
     'Menu_Exit'              = @{ 'zh-CN' = '00. Exit      - 退出程序'; 'en-US' = '00. Exit      - Exit Toolbox' }
-    'Prompt_Select'          = @{ 'zh-CN' = '请输入功能编号 [01-06, L, 99, 00]'; 'en-US' = 'Please enter option number [01-06, L, 99, 00]' }
+    'Prompt_Select'          = @{ 'zh-CN' = '请输入功能编号 [01-08, L, 99, 00]'; 'en-US' = 'Please enter option number [01-08, L, 99, 00]' }
+
     'Err_InvalidChoice'      = @{ 'zh-CN' = '[!] 输入未匹配到有效选项，请正确输入！'; 'en-US' = '[!] Unmatched option, please enter a valid choice!' }
     'Msg_Pause'              = @{ 'zh-CN' = 'Press any key to return to menu... (按任意键返回主菜单)'; 'en-US' = 'Press any key to return to menu...' }
     'Msg_Bye'                = @{ 'zh-CN' = '已退出工具箱。 Bye!'; 'en-US' = 'Exited Toolbox. Bye!' }
