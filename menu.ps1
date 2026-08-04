@@ -14,6 +14,19 @@ $ProgressPreference = 'SilentlyContinue'
 # 默认基础配置
 $DefaultWslRoot = 'D:\wsl'
 
+function Pause-Menu {
+    Write-Host "`n$(Get-I18nStr 'Msg_Pause')" -ForegroundColor Gray
+    try {
+        if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+            $null = [Console]::ReadKey($true)
+        } else {
+            $null = Read-Host
+        }
+    } catch {
+        $null = Read-Host
+    }
+}
+
 # ------------------------------------------------------------------------------
 # 辅助函数: 安全执行子脚本（捕获所有报错并退回主菜单）
 # ------------------------------------------------------------------------------
@@ -29,6 +42,7 @@ function Invoke-SubScript {
         Pause-Menu
     }
 }
+
 
 # ------------------------------------------------------------------------------
 # 1. 安装 (Install) 包装调用
