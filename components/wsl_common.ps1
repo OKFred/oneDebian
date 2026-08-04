@@ -1,45 +1,26 @@
 ﻿# ==============================================================================
 # components/wsl_common.ps1
-# Description: WSL 管理脚本公共辅助函数 (防止 PowerShell 数组解包导致 $distros[0] 变成首字符 'd')
+# Description: WSL 管理脚本公共辅助函数 (防解包纯净版)
 # Author: Fred
 # ==============================================================================
 
 function Get-WslDistros {
     $distros = New-Object System.Collections.Generic.List[string]
 
-    # 1. 第一最高优先级：从 Windows 注册表 Lxss 中精确获取
     try {
-        $regPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
-        if (Test-Path -Path $regPath) {
-            $regKeys = Get-ChildItem -Path $regPath -ErrorAction SilentlyContinue
-            foreach ($k in $regKeys) {
-                $rawProp = (Get-ItemProperty -Path $k.PSPath -ErrorAction SilentlyContinue).DistributionName
-                if ($rawProp) {
-                    $cleanName = ($rawProp -replace '[^a-zA-Z0-9._-]', '').Trim()
-                    if ($cleanName -and -not $distros.Contains($cleanName)) {
-                        $distros.Add($cleanName)
-                    }
+        $rawList = & wsl.exe --list --quiet 2>$null
+        if ($rawList) {
+            foreach ($item in $rawList) {
+                # 正则清洗杂质与 UTF-16 字节，仅保留 Linux 发行版标准合法字符
+                $cleanName = ($item -replace '[^a-zA-Z0-9._-]', '').Trim()
+                if ($cleanName -and $cleanName -ne 'NAME' -and -not $distros.Contains($cleanName)) {
+                    $distros.Add($cleanName)
                 }
             }
         }
     } catch {}
 
-    # 2. 备用降级方案：解析 wsl.exe --list --quiet
-    if ($distros.Count -eq 0) {
-        try {
-            $rawList = & wsl.exe --list --quiet 2>$null
-            if ($rawList) {
-                foreach ($item in $rawList) {
-                    $cleanName = ($item -replace '[^a-zA-Z0-9._-]', '').Trim()
-                    if ($cleanName -and $cleanName -ne 'NAME' -and -not $distros.Contains($cleanName)) {
-                        $distros.Add($cleanName)
-                    }
-                }
-            }
-        } catch {}
-    }
-
-    # 强力逗号运算符前缀，防止 PowerShell pipeline 展开单元素数组导致变成 String 标量
+    # 逗号运算符前缀，防止 PowerShell pipeline 展开单元素数组
     return ,($distros.ToArray())
 }
 
