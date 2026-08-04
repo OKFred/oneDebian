@@ -20,7 +20,8 @@ $script:I18nDict = @{
     'Menu_Uninstall'         = @{ 'zh-CN' = '05. Uninstall - 卸载 (注销) WSL 发行版'; 'en-US' = '05. Uninstall - Unregister/Uninstall WSL Distribution' }
     'Menu_Config'            = @{ 'zh-CN' = '06. Config    - WSL 配置向导 (.wslconfig & wsl.conf)'; 'en-US' = '06. Config    - WSL Config Helper (.wslconfig & wsl.conf)' }
     'Menu_Status'            = @{ 'zh-CN' = '07. Status    - WSL 运维诊断与实例管理'; 'en-US' = '07. Status    - WSL Diagnostics & Instance Status' }
-    'Menu_Compact'           = @{ 'zh-CN' = '08. Compact   - vhdx 磁盘物理瘦身与空间压缩'; 'en-US' = '08. Compact   - vhdx Disk Shrinker & Compact' }
+    'Menu_Purge'             = @{ 'zh-CN' = '08. Purge      - WSL 环境全量彻底清理 (Full Purge)'; 'en-US' = '08. Purge      - Full WSL Environment Purge & Reset' }
+
     'Menu_Lang'              = @{ 'zh-CN' = 'L.  Language  - 切换界面语言 (Language)'; 'en-US' = 'L.  Language  - Switch Display Language' }
 
     'Menu_About'             = @{ 'zh-CN' = '99. About     - 关于工具箱'; 'en-US' = '99. About     - About Toolbox' }

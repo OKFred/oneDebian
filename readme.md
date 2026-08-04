@@ -43,7 +43,8 @@ cd oneDebian
 - **05. Uninstall (卸载)**：支持单选或批量全选 (All) 卸载注销 WSL 发行版，带有双重确认 (输入 `DELETE`) 防误删保护，并提示清理本地残留目录。
 - **06. Config (配置向导)**：引导配置全局 `~/.wslconfig` 与单分发 `/etc/wsl.conf`。基于微软官方标准默认值，提供彩色 Git Diff 对比预览，并针对多分发 Node.js 开发 (如 7001 端口) 提供 `localhostForwarding` 端口隔离专项配置。
 - **07. Status (运维诊断)**：格式化仪表盘实时查看所有 WSL 实例状态、内存与 `.vhdx` 物理磁盘路径与大小，支持健康度诊断与进程杀死。
-- **08. Compact (全量磁盘清理瘦身)**：全量扫描清理并紧凑化压缩所有 WSL 相关的物理虚拟磁盘空间。带有双重安全确认 (输入 `COMPACT`)，自动化调用 `fstrim` + `diskpart` 向宿主机直接归还数 GB 至数十 GB 物理空间。
+- **08. Purge (全量环境清理)**：全量扫描并彻底注销所有 WSL 实例、删除数据文件夹、清理镜像缓存与导出备份。包含双重高危确认 (输入 `PURGE`) 保护，并重置 WSL 堆栈。
+
 - **L. Language (语言切换)**：支持界面在一键无缝切换 `简体中文` 与 `English`。
 
 ---
@@ -101,8 +102,9 @@ cd oneDebian
 - **05. Uninstall**: Single or batch unregister WSL distros with Double Confirm (`DELETE`) safety protection and residual folder cleanup.
 - **06. Config**: Guided configuration for global `~/.wslconfig` and per-distro `/etc/wsl.conf`. Based on official default values with colored Git Diff preview and port forwarding isolation (`localhostForwarding`) for multi-instance Node.js development.
 - **07. Status**: Formatted dashboard showing running state, memory, and `.vhdx` disk paths/sizes for all WSL instances, with health check and process termination.
-- **08. Compact**: Scans and compacts all WSL `.vhdx` physical disk files. Includes Double Confirm (`COMPACT`) and automates `fstrim` + `diskpart` to reclaim gigabytes of disk space to host.
+- **08. Purge**: Full WSL environment purge and reset. Unregisters all distros, cleans storage folders, rootfs caches, and backups with Double Confirm (`PURGE`) protection and WSL stack reset.
 - **L. Language**: Toggle display language seamlessly between `简体中文` and `English`.
+
 
 ---
 
@@ -145,5 +147,6 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
   - `wsl_uninstall.ps1` - WSL 发行版注销卸载脚本 / WSL Distro Uninstaller
   - `wsl_config.ps1` - WSL 全局与单分发配置向导脚本 / WSL Config Helper
   - `wsl_status.ps1` - WSL 运维诊断与实例管理脚本 / WSL Status & Health Checker
-  - `wsl_compact.ps1` - 全量 WSL 磁盘清理与物理容量压缩瘦身脚本 / WSL Full Disk Shrinker
+  - `wsl_purge.ps1` - 全量 WSL 环境彻底清理与重置脚本 / Full WSL Environment Purge & Reset
   - `*.sh` - Linux Bash 下的各项运维安装子组件 / Linux Bash Installer Components
+
