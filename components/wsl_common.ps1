@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_common.ps1
-# Description: WSL 管理脚本公共辅助函数 (防解包纯净版)
+# Description: WSL 管理脚本公共辅助函数 (极简无正则标准版)
 # Author: Fred
 # ==============================================================================
 
@@ -8,19 +8,18 @@ function Get-WslDistros {
     $distros = New-Object System.Collections.Generic.List[string]
 
     try {
-        $rawList = & wsl.exe --list --quiet 2>$null
-        if ($rawList) {
-            foreach ($item in $rawList) {
-                # 正则清洗杂质与 UTF-16 字节，仅保留 Linux 发行版标准合法字符
-                $cleanName = ($item -replace '[^a-zA-Z0-9._-]', '').Trim()
-                if ($cleanName -and $cleanName -ne 'NAME' -and -not $distros.Contains($cleanName)) {
-                    $distros.Add($cleanName)
+        $raw = & wsl.exe --list --quiet 2>$null
+        if ($raw) {
+            $lines = ($raw | Out-String) -replace "`0", "" -split "`r?`n"
+            foreach ($line in $lines) {
+                $name = $line.Trim()
+                if ($name -and $name -ne 'NAME' -and -not $distros.Contains($name)) {
+                    $distros.Add($name)
                 }
             }
         }
     } catch {}
 
-    # 逗号运算符前缀，防止 PowerShell pipeline 展开单元素数组
     return ,($distros.ToArray())
 }
 
@@ -29,7 +28,6 @@ function Select-WslDistro {
         [string]$Title = $(Get-I18nStr 'Select_Distro_Title')
     )
 
-    # 强制 @() 数组包裹，防护单字符串索引 [0] 误拆成首字符
     $distros = @(Get-WslDistros)
     if ($distros.Count -eq 0) {
         Write-Host "`n[!] $(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
