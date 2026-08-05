@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_common.ps1
-# Description: WSL 管理脚本公共辅助函数 (极简无正则标准版)
+# Description: WSL 管理脚本公共辅助函数 (修复无发行版时误打出 System.String[] 的 Bug)
 # Author: Fred
 # ==============================================================================
 
@@ -13,12 +13,22 @@ function Get-WslDistros {
             $lines = ($raw | Out-String) -replace "`0", "" -split "`r?`n"
             foreach ($line in $lines) {
                 $name = $line.Trim()
-                if ($name -and $name -ne 'NAME' -and -not $distros.Contains($name)) {
+                # 过滤无已安装分发时的系统提示词条
+                if ($name -and 
+                    $name -ne 'NAME' -and 
+                    $name -notlike '*no installed distributions*' -and 
+                    $name -notlike '*没有已安装的分发*' -and 
+                    $name -notlike '*Use *wsl.exe*' -and 
+                    -not $distros.Contains($name)) {
                     $distros.Add($name)
                 }
             }
         }
     } catch {}
+
+    if ($distros.Count -eq 0) {
+        return @()
+    }
 
     return ,($distros.ToArray())
 }
