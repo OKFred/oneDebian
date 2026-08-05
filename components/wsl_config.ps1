@@ -267,23 +267,22 @@ function Configure-SingleDistroConf {
 
     $confirmSave = Read-Host "`n确认将上述配置写入 $targetDistro 的 /etc/wsl.conf 吗？[Y/N]"
     if ($confirmSave -in 'Y', 'y') {
-        # 写入临时文件
-        $tempFile = [System.IO.Path]::GetTempFileName()
-        [System.IO.File]::WriteAllText($tempFile, $newConfContent, [System.Text.Encoding]::UTF8)
+        # 1. 备份 Linux 内部原 /etc/wsl.conf
+        & wsl.exe -d $targetDistro -u root -- bash -c "[ -f /etc/wsl.conf ] && cp /etc/wsl.conf /etc/wsl.conf.bak" 2>$null
 
-        # 备份原文件
-        & wsl.exe -d $targetDistro -u root -- bash -c "[ -f /etc/wsl.conf ] && cp /etc/wsl.conf /etc/wsl.conf.bak"
-        
-        # 复制新配置入 Linux
-        $wslTempPath = (& wsl.exe -d $targetDistro -u root -- wslpath -u $tempFile).Trim()
-        & wsl.exe -d $targetDistro -u root -- bash -c "cp $wslTempPath /etc/wsl.conf && chmod 644 /etc/wsl.conf"
-        Remove-Item -LiteralPath $tempFile -Force 2>$null
+        # 2. 通过 stdin 管道将 Windows 内存配置直接覆盖写入 /etc/wsl.conf
+        $newConfContent | & wsl.exe -d $targetDistro -u root -- bash -c "cat > /etc/wsl.conf && chmod 644 /etc/wsl.conf"
 
-        Write-Host "`n[✓] 发行版 $targetDistro 的 /etc/wsl.conf 已成功更新！" -ForegroundColor Green
-        Write-Host "[!] 提示: 修改后需在 PowerShell 执行 'wsl --terminate $targetDistro' 重启该分发以使配置生效。" -ForegroundColor Yellow
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "`n[✓] 发行版 $targetDistro 的 /etc/wsl.conf 已成功更新！" -ForegroundColor Green
+            Write-Host "[!] 提示: 修改后需在 PowerShell 执行 'wsl --terminate $targetDistro' 重启该分发以使配置生效。" -ForegroundColor Yellow
+        } else {
+            Write-Host "`n[!] 写入 /etc/wsl.conf 失败 (Exit Code: $LASTEXITCODE)。" -ForegroundColor Red
+        }
     } else {
         Write-Host "配置保存已取消。" -ForegroundColor Gray
     }
+
 }
 
 # ------------------------------------------------------------------------------
