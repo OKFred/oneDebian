@@ -212,7 +212,8 @@ function Configure-SingleDistroConf {
     if (-not $targetDistro) { return }
 
     # 读取已有配置文件
-    $existingContent = (& wsl.exe -d $targetDistro -u root -- bash -c "cat /etc/wsl.conf 2>/dev/null") -join "`n"
+    $existingContent = (& wsl.exe -d $targetDistro -u root -- bash -c "cat /etc/wsl.conf 2>/dev/null" 2>$null) -join "`n"
+
 
     Write-Host "`n正在配置发行版 '$targetDistro' 的 /etc/wsl.conf:" -ForegroundColor Cyan
     Write-Host "交互说明: [按回车] 自动应用默认值；输入双减号 [--] 则该项不填/不写入。`n" -ForegroundColor Cyan
@@ -267,21 +268,28 @@ function Configure-SingleDistroConf {
 
     $confirmSave = Read-Host "`n确认将上述配置写入 $targetDistro 的 /etc/wsl.conf 吗？[Y/N]"
     if ($confirmSave -in 'Y', 'y') {
-        # 1. 备份 Linux 内部原 /etc/wsl.conf
-        & wsl.exe -d $targetDistro -u root -- bash -c "[ -f /etc/wsl.conf ] && cp /etc/wsl.conf /etc/wsl.conf.bak" 2>$null
+        $oldErrorPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            # 1. 备份 Linux 内部原 /etc/wsl.conf
+            & wsl.exe -d $targetDistro -u root -- bash -c "[ -f /etc/wsl.conf ] && cp /etc/wsl.conf /etc/wsl.conf.bak" 2>$null
 
-        # 2. 通过 stdin 管道将 Windows 内存配置直接覆盖写入 /etc/wsl.conf
-        $newConfContent | & wsl.exe -d $targetDistro -u root -- bash -c "cat > /etc/wsl.conf && chmod 644 /etc/wsl.conf"
+            # 2. 通过 stdin 管道写入，屏蔽来自 systemd user session 的警告提示音/文本 (2>$null)
+            $newConfContent | & wsl.exe -d $targetDistro -u root -- bash -c "cat > /etc/wsl.conf && chmod 644 /etc/wsl.conf" 2>$null
 
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "`n[✓] 发行版 $targetDistro 的 /etc/wsl.conf 已成功更新！" -ForegroundColor Green
-            Write-Host "[!] 提示: 修改后需在 PowerShell 执行 'wsl --terminate $targetDistro' 重启该分发以使配置生效。" -ForegroundColor Yellow
-        } else {
-            Write-Host "`n[!] 写入 /etc/wsl.conf 失败 (Exit Code: $LASTEXITCODE)。" -ForegroundColor Red
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "`n[✓] 发行版 $targetDistro 的 /etc/wsl.conf 已成功更新！" -ForegroundColor Green
+                Write-Host "[!] 提示: 修改后需在 PowerShell 执行 'wsl --terminate $targetDistro' 重启该分发以使配置生效。" -ForegroundColor Yellow
+            } else {
+                Write-Host "`n[!] 写入 /etc/wsl.conf 失败 (Exit Code: $LASTEXITCODE)。" -ForegroundColor Red
+            }
+        } finally {
+            $ErrorActionPreference = $oldErrorPref
         }
     } else {
         Write-Host "配置保存已取消。" -ForegroundColor Gray
     }
+
 
 }
 
