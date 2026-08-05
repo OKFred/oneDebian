@@ -55,23 +55,26 @@ try {
         return
     }
 
-    $builds = @(
-        [regex]::Matches($listing, 'href="(?<build>\d{8}_\d{2}%3A\d{2}/)"') |
+    $rawBuilds = @(
+        [regex]::Matches($listing, 'href="(?<build>\d{8}[^"]+/)"') |
             ForEach-Object { $_.Groups['build'].Value } |
             Sort-Object -Descending
     )
-    if ($builds.Count -eq 0) {
+    if ($rawBuilds.Count -eq 0) {
         Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { "错误: 未找到适用于 Debian $Version (amd64) 的 rootfs 镜像。" } else { "Error: No rootfs image found for Debian $Version (amd64)." })" -ForegroundColor Red
         return
     }
 
-    $imageUrl = "$imageDirectory$($builds[0])"
-    $rootfsUrl = "$imageUrl`rootfs.tar.xz"
+    # URL 解码 %3A 为标准的冒号 :，防止 curl.exe (Exit Code 3) 报错
+    $cleanBuild = [System.Uri]::UnescapeDataString($rawBuilds[0])
+    $imageUrl = "$imageDirectory$cleanBuild"
+    $rootfsUrl = "${imageUrl}rootfs.tar.xz"
 
     Write-Host "`n$(Get-I18nStr 'Install_Confirm_Title')" -ForegroundColor Yellow
     Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '发行版名称' } else { 'Distro Name' }): $distroName" -ForegroundColor Cyan
     Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '目标安装目录' } else { 'Install Directory' }): $installPath" -ForegroundColor Cyan
     Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '镜像下载地址' } else { 'Image Download URL' }): $rootfsUrl" -ForegroundColor Gray
+
 
     $confirm = Read-Host "`n$(Get-I18nStr 'Install_Confirm_Prompt') $distroName? [Y/N]"
     if ($confirm -ne 'Y' -and $confirm -ne 'y') {
@@ -80,14 +83,15 @@ try {
     }
 
     Write-Host "`n[1/3] $(if ($global:CurrentLang -eq 'zh-CN') { "正在下载 Debian $Version rootfs..." } else { "Downloading Debian $Version rootfs..." })" -ForegroundColor Green
-    & curl.exe -fL --retry 3 --retry-delay 2 -o $archivePath $rootfsUrl
+    & curl.exe -fL --retry 3 --retry-delay 2 -o "$archivePath" "$rootfsUrl"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { "错误: 镜像下载失败 (Exit Code: $LASTEXITCODE)。" } else { "Error: Image download failed (Exit Code: $LASTEXITCODE)." })" -ForegroundColor Red
         return
     }
 
     Write-Host "[2/3] $(if ($global:CurrentLang -eq 'zh-CN') { '正在校验 SHA-256 签名...' } else { 'Verifying SHA-256 checksum...' })" -ForegroundColor Green
-    $checksums = (& curl.exe -fLs "$imageUrl`SHA256SUMS") -join "`n"
+    $checksums = (& curl.exe -fLs "${imageUrl}SHA256SUMS") -join "`n"
+
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { '错误: 无法获取 SHA256SUMS 校验文件。' } else { 'Error: Failed to fetch SHA256SUMS file.' })" -ForegroundColor Red
         return
