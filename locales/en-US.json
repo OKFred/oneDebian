@@ -49,8 +49,7 @@
   "Uninstall_Title": "5. Unregister/Uninstall WSL Distribution",
   "Uninstall_Select_Title": "=== Select WSL Distributions to Uninstall ===",
   "Uninstall_Warn_Step1": "[!] ⚠️ Warning: Preparing to unregister the following WSL distros:",
-  "Uninstall_Confirm_Step1": "[1/2 First Confirmation] Are you sure to continue? (Enter Y to proceed)",
-  "Uninstall_Confirm_Step2": "[2/2 Final Confirmation] Please type uppercase 'DELETE' to execute",
+  "Uninstall_Confirm_Step1": "[Double Confirmation] Are you sure to continue? (Enter Y to proceed)",
 
   "Config_Title": "6. WSL Guided Config Helper (Config)",
   "Config_Opt_Global": "[1] Global Configuration (.wslconfig - affects all WSL instances)",

@@ -49,8 +49,7 @@
   "Uninstall_Title": "5. 卸载 (注销) WSL 发行版",
   "Uninstall_Select_Title": "=== 选择要卸载注销的 WSL 发行版 ===",
   "Uninstall_Warn_Step1": "[!] ⚠️ 警告: 准备注销卸载以下 WSL 发行版:",
-  "Uninstall_Confirm_Step1": "[1/2 第一次确认] 确认要继续吗？(输入 Y 确认继续)",
-  "Uninstall_Confirm_Step2": "[2/2 第二次确认] 请手动输入大写 'DELETE' 以最终执行",
+  "Uninstall_Confirm_Step1": "[再次确认] 确认要继续吗？(输入 Y 确认继续)",
 
   "Config_Title": "6. WSL 引导式配置向导 (Config)",
   "Config_Opt_Global": "[1] 全局配置文件 (.wslconfig - 影响所有 WSL 实例)",
