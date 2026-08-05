@@ -28,7 +28,7 @@ function Show-WslDashboard {
     # 2. 读取所有已安装的 WSL 发行版与 Disk VHDX 大小
     Write-Host "`n$(Get-I18nStr 'Status_Step2')" -ForegroundColor Yellow
     
-    $distros = @(Get-WslDistros)
+    [string[]]$distros = Get-WslDistros
 
     if ($distros.Count -eq 0) {
         Write-Host "  $(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
@@ -42,7 +42,8 @@ function Show-WslDashboard {
     Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
 
     for ($i = 0; $i -lt $distros.Count; $i++) {
-        $name = $distros[$i]
+        $name = [string]$distros[$i]
+
         
         $state = "Stopped"
         $wslVer = "2"

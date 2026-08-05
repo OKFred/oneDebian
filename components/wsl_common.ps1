@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_common.ps1
-# Description: WSL 管理脚本公共辅助函数 (修复无发行版时误打出 System.String[] 的 Bug)
+# Description: WSL 管理脚本公共辅助函数 (修复 -f 格式化输出 System.String[] 的 Bug)
 # Author: Fred
 # ==============================================================================
 
@@ -26,11 +26,8 @@ function Get-WslDistros {
         }
     } catch {}
 
-    if ($distros.Count -eq 0) {
-        return @()
-    }
-
-    return ,($distros.ToArray())
+    # 返回纯粹打平的一维字符串数组
+    return [string[]]$distros.ToArray()
 }
 
 function Select-WslDistro {
@@ -38,7 +35,7 @@ function Select-WslDistro {
         [string]$Title = $(Get-I18nStr 'Select_Distro_Title')
     )
 
-    $distros = @(Get-WslDistros)
+    [string[]]$distros = Get-WslDistros
     if ($distros.Count -eq 0) {
         Write-Host "`n[!] $(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
         return $null
@@ -46,7 +43,8 @@ function Select-WslDistro {
 
     Write-Host "`n=== $Title ===" -ForegroundColor Cyan
     for ($i = 0; $i -lt $distros.Count; $i++) {
-        Write-Host " [$($i + 1)] $($distros[$i])"
+        $name = [string]$distros[$i]
+        Write-Host " [$($i + 1)] $name"
     }
 
     while ($true) {
@@ -59,7 +57,7 @@ function Select-WslDistro {
         if ($inputVal -match '^\d+$') {
             $index = [int]$inputVal - 1
             if ($index -ge 0 -and $index -lt $distros.Count) {
-                return $distros[$index]
+                return [string]$distros[$index]
             }
         }
 
