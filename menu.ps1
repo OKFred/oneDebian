@@ -62,16 +62,21 @@ function Invoke-Install-Wrapper {
         return
     }
 
+    $defaultName = "Debian-$version"
+    $nameInput = Read-Host "$(if ($global:CurrentLang -eq 'zh-CN') { "输入自定义 WSL 发行版名称 (按回车默认 '$defaultName')" } else { "Enter custom distro name (Default '$defaultName')" })"
+    $distroName = if ($nameInput) { $nameInput.Trim() } else { $defaultName }
+
     $wslRoot = Read-Host "$(Get-I18nStr 'Install_Dir_Prompt') (默认 $DefaultWslRoot)"
     if (-not $wslRoot) { $wslRoot = $DefaultWslRoot }
 
     $installScript = Join-Path $PSScriptRoot 'components\wsl_install.ps1'
     if (Test-Path -LiteralPath $installScript) {
-        & $installScript -Version $version -WslRoot $wslRoot
+        & $installScript -Version $version -DistroName $distroName -WslRoot $wslRoot
     } else {
         Write-Host "错误: 未找到组件脚本 $installScript" -ForegroundColor Red
     }
 }
+
 
 # ------------------------------------------------------------------------------
 # 99. 关于 (About)
