@@ -204,6 +204,11 @@ function Configure-WslConfig {
 # 2. 单分发配置向导 (wsl.conf)
 # ------------------------------------------------------------------------------
 function Configure-SingleDistroConf {
+    # 临时降级 ErrorActionPreference，防止 wsl.exe 的 systemd stderr 警告被 Stop 模式误判为致命异常
+    $oldErrorPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+
     Write-Host "`n------------------------------------------" -ForegroundColor Yellow
     Write-Host "   分发内部配置向导 (/etc/wsl.conf)      " -ForegroundColor Yellow
     Write-Host "------------------------------------------" -ForegroundColor Yellow
@@ -214,11 +219,8 @@ function Configure-SingleDistroConf {
     # 读取已有配置文件
     $existingContent = (& wsl.exe -d $targetDistro -u root -- bash -c "cat /etc/wsl.conf 2>/dev/null" 2>$null) -join "`n"
 
-
     Write-Host "`n正在配置发行版 '$targetDistro' 的 /etc/wsl.conf:" -ForegroundColor Cyan
     Write-Host "交互说明: [按回车] 自动应用默认值；输入双减号 [--] 则该项不填/不写入。`n" -ForegroundColor Cyan
-
-
 
     $systemd = Read-ConfigPrompt -Message "是否启用 Systemd 初始化服务管理器？[true/false]" -DefaultValue "true"
     $defaultUser = Read-ConfigPrompt -Message "默认登录用户名" -DefaultValue "root"
@@ -268,30 +270,27 @@ function Configure-SingleDistroConf {
 
     $confirmSave = Read-Host "`n确认将上述配置写入 $targetDistro 的 /etc/wsl.conf 吗？[Y/N]"
     if ($confirmSave -in 'Y', 'y') {
-        $oldErrorPref = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            # 1. 备份 Linux 内部原 /etc/wsl.conf
-            & wsl.exe -d $targetDistro -u root -- bash -c "[ -f /etc/wsl.conf ] && cp /etc/wsl.conf /etc/wsl.conf.bak" 2>$null
+        # 1. 备份 Linux 内部原 /etc/wsl.conf
+        & wsl.exe -d $targetDistro -u root -- bash -c "[ -f /etc/wsl.conf ] && cp /etc/wsl.conf /etc/wsl.conf.bak" 2>$null
 
-            # 2. 通过 stdin 管道写入，屏蔽来自 systemd user session 的警告提示音/文本 (2>$null)
-            $newConfContent | & wsl.exe -d $targetDistro -u root -- bash -c "cat > /etc/wsl.conf && chmod 644 /etc/wsl.conf" 2>$null
+        # 2. 通过 stdin 管道写入
+        $newConfContent | & wsl.exe -d $targetDistro -u root -- bash -c "cat > /etc/wsl.conf && chmod 644 /etc/wsl.conf" 2>$null
 
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "`n[✓] 发行版 $targetDistro 的 /etc/wsl.conf 已成功更新！" -ForegroundColor Green
-                Write-Host "[!] 提示: 修改后需在 PowerShell 执行 'wsl --terminate $targetDistro' 重启该分发以使配置生效。" -ForegroundColor Yellow
-            } else {
-                Write-Host "`n[!] 写入 /etc/wsl.conf 失败 (Exit Code: $LASTEXITCODE)。" -ForegroundColor Red
-            }
-        } finally {
-            $ErrorActionPreference = $oldErrorPref
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "`n[✓] 发行版 $targetDistro 的 /etc/wsl.conf 已成功更新！" -ForegroundColor Green
+            Write-Host "[!] 提示: 修改后需在 PowerShell 执行 'wsl --terminate $targetDistro' 重启该分发以使配置生效。" -ForegroundColor Yellow
+        } else {
+            Write-Host "`n[!] 写入 /etc/wsl.conf 失败 (Exit Code: $LASTEXITCODE)。" -ForegroundColor Red
         }
     } else {
         Write-Host "配置保存已取消。" -ForegroundColor Gray
     }
 
-
+    } finally {
+        $ErrorActionPreference = $oldErrorPref
+    }
 }
+
 
 # ------------------------------------------------------------------------------
 # 主控制菜单入口
