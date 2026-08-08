@@ -168,6 +168,8 @@ function Configure-WslConfig {
     if ($cpu) { $wsl2Lines += "processors=$cpu" }
     if ($swap) { $wsl2Lines += "swap=$swap" }
     if ($lhf) { $wsl2Lines += "localhostForwarding=$lhf" }
+    if ($netMode) { $wsl2Lines += "networkingMode=$netMode" }
+    if ($dns) { $wsl2Lines += "dnsTunneling=$dns" }
     $wsl2Lines += "nestedVirtualization=true"
     $wsl2Lines += "guiApplications=true"
 
@@ -175,8 +177,6 @@ function Configure-WslConfig {
     $expLines = @("[experimental]")
     if ($sparse) { $expLines += "sparseVhd=$sparse" }
     if ($reclaim) { $expLines += "autoMemoryReclaim=$reclaim" }
-    if ($netMode) { $expLines += "networkingMode=$netMode" }
-    if ($dns) { $expLines += "dnsTunneling=$dns" }
 
     $newConfigContent = ($wsl2Lines + "" + $expLines) -join "`n"
 
