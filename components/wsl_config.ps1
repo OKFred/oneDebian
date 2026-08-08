@@ -167,7 +167,7 @@ function Configure-WslConfig {
     if ($mem) { $wsl2Lines += "memory=$mem" }
     if ($cpu) { $wsl2Lines += "processors=$cpu" }
     if ($swap) { $wsl2Lines += "swap=$swap" }
-    if ($lhf) { $wsl2Lines += "localhostForwarding=$lhf" }
+    if ($lhf -and $netMode -ne 'mirrored') { $wsl2Lines += "localhostForwarding=$lhf" }
     if ($netMode) { $wsl2Lines += "networkingMode=$netMode" }
     if ($dns) { $wsl2Lines += "dnsTunneling=$dns" }
     $wsl2Lines += "nestedVirtualization=true"
