@@ -100,7 +100,7 @@ function Set-IniValue {
 function Read-ConfigPrompt {
     param(
         [string]$Message,
-        [AllowNull()][string]$CurrentValue,
+        [AllowNull()][object]$CurrentValue,
         [string]$HintText = '',
         [string[]]$AllowedValues = @(),
         [scriptblock]$Validator,
@@ -182,6 +182,8 @@ function Show-ConfigDiff {
 
     $oldPath = [System.IO.Path]::GetTempFileName()
     $newPath = [System.IO.Path]::GetTempFileName()
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $hasNativeErrorPreference = Test-Path Variable:PSNativeCommandUseErrorActionPreference
     if ($hasNativeErrorPreference) {
         $oldNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
@@ -191,7 +193,11 @@ function Show-ConfigDiff {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($oldPath, $OldContent, $utf8NoBom)
         [System.IO.File]::WriteAllText($newPath, $NewContent, $utf8NoBom)
-        $diffLines = & $git.Source diff --no-index --no-color --unified=3 -- $oldPath $newPath 2>$null
+        $diffLines = & $git.Source -c core.autocrlf=false -c core.safecrlf=false diff --no-index --no-color --unified=3 -- $oldPath $newPath 2>$null
+        $diffExitCode = $LASTEXITCODE
+        if ($diffExitCode -notin 0, 1) {
+            throw "Git diff failed (Exit Code: $diffExitCode)."
+        }
         foreach ($line in $diffLines) {
             if ($line.StartsWith('+') -and -not $line.StartsWith('+++')) {
                 Write-Host $line -ForegroundColor Green
@@ -204,6 +210,7 @@ function Show-ConfigDiff {
             }
         }
     } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
         if ($hasNativeErrorPreference) {
             $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference
         }

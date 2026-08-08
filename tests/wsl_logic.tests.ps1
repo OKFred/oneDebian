@@ -49,6 +49,14 @@ Assert-True ($updated.Contains('; keep this comment')) 'comment was not preserve
 Assert-True ($updated.Contains('kernel=C:\custom\kernel')) 'unknown key was not preserved'
 Assert-True ($updated.Contains('[custom]')) 'unknown section was not preserved'
 
+$nullPromptResult = & {
+    function Read-Host { param([string]$Prompt) return '' }
+    Read-ConfigPrompt -Message 'test' -CurrentValue $null
+}
+Assert-True ($null -eq $nullPromptResult.Value) 'an unset value must remain null instead of becoming an empty string'
+
+Show-ConfigDiff -OldContent "[wsl2]`r`nmemory=4GB`r`n" -NewContent "[wsl2]`nmemory=8GB`n" -TargetTitle 'Regression test'
+
 Write-Host '[4/5] Validating locale JSON files...' -ForegroundColor Cyan
 foreach ($locale in (Get-ChildItem $repoRoot -Recurse -Filter '*.json' | Where-Object { $_.DirectoryName -match 'locales$' })) {
     $parsed = Get-Content -LiteralPath $locale.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
