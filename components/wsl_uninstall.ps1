@@ -52,13 +52,13 @@ function Invoke-WslUninstall {
     Write-Host "`n$(Get-I18nStr 'Uninstall_Warn_Step1')" -ForegroundColor Red
     foreach ($d in $targetDistros) { Write-Host "  • $d" -ForegroundColor Yellow }
 
-    $confirm = Read-Host "`n确认要卸载注销上述 WSL 发行版吗？[Y/N]"
+    $confirm = Read-Host "`n$(Get-I18nStr 'Uninstall_Confirm_Step1')"
     if ($confirm -ne 'Y' -and $confirm -ne 'y') {
         Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
         return
     }
 
-    $confirmToken = Read-Host "请输入 DELETE 以进行最终确认"
+    $confirmToken = Read-Host "$(Get-I18nStr 'Uninstall_Confirm_Step2')"
     if ($confirmToken -cne 'DELETE') {
         Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
         return

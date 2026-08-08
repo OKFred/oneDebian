@@ -182,6 +182,11 @@ function Show-ConfigDiff {
 
     $oldPath = [System.IO.Path]::GetTempFileName()
     $newPath = [System.IO.Path]::GetTempFileName()
+    $hasNativeErrorPreference = Test-Path Variable:PSNativeCommandUseErrorActionPreference
+    if ($hasNativeErrorPreference) {
+        $oldNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
+    }
     try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($oldPath, $OldContent, $utf8NoBom)
@@ -199,6 +204,9 @@ function Show-ConfigDiff {
             }
         }
     } finally {
+        if ($hasNativeErrorPreference) {
+            $PSNativeCommandUseErrorActionPreference = $oldNativeErrorPreference
+        }
         Remove-Item -LiteralPath $oldPath, $newPath -Force -ErrorAction SilentlyContinue
     }
 }

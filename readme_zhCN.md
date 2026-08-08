@@ -12,7 +12,7 @@
 
 ### 1. Windows 环境 (PowerShell WSL 管理工具箱)
 
-适合在 Windows 10/11 PowerShell 环境下快速检测环境、安装与管理 Debian 12 / Debian 13 等 WSL 实例。
+适合在 Windows 10/11 PowerShell 5.1 或更高版本下检测环境、安装与管理 Debian 12 / Debian 13 WSL 实例，建议使用 Microsoft Store 分发的新版 WSL。
 
 ```powershell
 # 1. 克隆/拉取仓库
@@ -29,16 +29,24 @@ cd oneDebian
 #### PowerShell 菜单功能清单 (`menu.ps1`)
 
 - **00. Precheck (安装前预检)**：自动化排查 CPU 硬件虚拟化 (VT-x/AMD-V) 开启状态、Windows 虚拟机平台功能、WSL2 命令行连通性与磁盘可用空间，支持一键 DISM 自动修复或跳过。
-- **01. Install (安装)**：自动下载官方 rootfs，导入安装指定版本 (Debian 12/13) 的 WSL 发行版。
+- **01. Install (安装)**：根据 AMD64/ARM64 架构从 Linux Containers 镜像服务下载 Debian rootfs，强制验证匹配的 SHA-256 校验和后导入为 WSL 2。
 - **02. Update (更新)**：更新指定 WSL Debian 的 `apt` 软件包或更新 Windows `wsl --update` 核心。
-- **03. Backup (备份)**：将指定 WSL 发行版导出备份为 `.tar` 镜像文件。
+- **03. Backup (备份)**：将指定 WSL 发行版导出为便携的 `.tar` 或 WSL 2 `.vhdx` 快照。
 - **04. Restore (还原)**：从 `.tar` 或 `.vhdx` 备份镜像还原/导入为新的 WSL 发行版。
-- **05. Uninstall (卸载)**：支持单选或批量全选 (All) 卸载注销 WSL 发行版，带有双重确认 (输入 `DELETE`) 防误删保护，并提示清理本地残留目录。
-- **06. Config (配置向导)**：引导配置全局 `~/.wslconfig` 与单分发 `/etc/wsl.conf`。基于微软官方标准默认值，提供彩色 Git Diff 对比预览，针对字节飞连 VPN 与多分发 Node.js 开发 (如 7001 端口) 提供 `localhostForwarding` 端口隔离专项配置。
-- **07. Status (运维诊断)**：格式化仪表盘实时查看所有 WSL 实例状态、内存与 `.vhdx` 物理磁盘路径与大小，支持健康度诊断与进程杀死。
-- **08. Purge (全量环境清理)**：全量扫描并彻底注销所有 WSL 实例、删除数据文件夹、清理镜像缓存与导出备份。包含双重高危确认 (输入 `PURGE`) 保护，并重置 WSL 堆栈。
+- **05. Uninstall (卸载)**：支持单选或批量注销，要求 `Y` + `DELETE` 双重确认；只调用 `wsl --unregister`，不再猜测并递归删除发行版目录。
+- **06. Config (配置向导)**：增量更新全局 `%UserProfile%\.wslconfig` 与单分发 `/etc/wsl.conf`，保留注释和未知配置键，校验输入并显示顺序敏感的 Git Diff。
+- **07. Status (运维诊断)**：从注册信息读取真实 VHD 路径和大小，并检查运行中发行版的 IPv4、默认路由及 NetworkManager/systemd-networkd 冲突。
+- **08. Purge (全量环境清理)**：注销选中的发行版，并按范围清理工具箱镜像缓存和导出备份；要求 `Y` + `PURGE` 双重确认。任一注销失败时保留恢复数据。
 - **L. Language (语言切换)**：支持界面在一键无缝切换 `简体中文` 与 `English`。
 - **0. Exit (退出)**：退出工具箱（可直接按 Enter 回车或输入 0）。
+
+#### WSL 配置行为
+
+- 直接回车或输入 `--` 表示保留当前值；输入 `unset` 删除对应配置键。
+- 资源项默认保持未设置，让 WSL 使用自适应默认值：宿主机内存的 50%、全部逻辑处理器，以及根据内存上限计算的 Swap。
+- `.wslconfig` 对所有 WSL 2 发行版全局生效；`localhostForwarding=false` 会全局关闭 Windows localhost 转发，不是单发行版端口隔离。
+- NAT 仍是默认网络模式。mirrored 会改善 VPN 与 IPv6 兼容性，但局域网入站访问仍可能需要配置 Hyper-V 防火墙。
+- 启用 systemd 时，如果同时检测到 NetworkManager 与 systemd-networkd，向导会提示它们可能覆盖 WSL 注入的 `eth0` 地址和路由。
 
 ---
 
@@ -86,3 +94,13 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
   - `wsl_status.ps1` - WSL 运维诊断与实例管理脚本
   - `wsl_purge.ps1` - 全量 WSL 环境彻底清理与重置脚本
   - `*.sh` - Linux Bash 下的各项运维安装子组件
+
+## 开发验证
+
+使用以下命令运行不依赖 Pester 的 PowerShell 5.1 兼容性及配置合并测试：
+
+```powershell
+.\tests\wsl_logic.tests.ps1
+```
+
+本工具的 WSL 行为以微软官方的[高级配置](https://learn.microsoft.com/windows/wsl/wsl-config)、[网络说明](https://learn.microsoft.com/windows/wsl/networking)和[命令行操作](https://learn.microsoft.com/windows/wsl/basic-commands)文档为准。

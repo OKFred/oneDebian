@@ -77,7 +77,7 @@ function Invoke-WslPurge {
         return
     }
 
-    $confirmToken = Read-Host "请输入 PURGE 以进行最终确认"
+    $confirmToken = Read-Host "$(Get-I18nStr 'Purge_Confirm_Step2')"
     if ($confirmToken -cne 'PURGE') {
         Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
         return

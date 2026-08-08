@@ -12,7 +12,7 @@
 
 ### 1. Windows Environment (PowerShell WSL Management Toolbox)
 
-Designed for Windows 10/11 PowerShell to easily check, install, and manage Debian 12 / Debian 13 WSL instances.
+Designed for Windows 10/11 PowerShell 5.1 or later to check, install, and manage Debian 12 / Debian 13 WSL instances. Current Store-delivered WSL is recommended.
 
 ```powershell
 # 1. Clone the repository
@@ -29,16 +29,24 @@ cd oneDebian
 #### PowerShell Menu Features Overview (`menu.ps1`)
 
 - **00. Precheck**: Pre-install environment check & diagnostic. Checks CPU hardware virtualization (VT-x/AMD-V), Windows `VirtualMachinePlatform` features, WSL2 default version, and disk free space with one-click DISM auto-fix or skip.
-- **01. Install**: Automatically downloads official rootfs and imports requested Debian WSL (12 / 13).
+- **01. Install**: Downloads an AMD64/ARM64 Debian rootfs from the Linux Containers image service, requires a matching SHA-256 checksum, and imports it as WSL 2.
 - **02. Update**: Update `apt` packages inside WSL or update Windows `wsl --update` core.
-- **03. Backup**: Export and backup specified WSL distro to `.tar` archive.
+- **03. Backup**: Export a WSL distro as a portable `.tar` archive or a WSL 2 `.vhdx` snapshot.
 - **04. Restore**: Import and restore WSL distro from `.tar` or `.vhdx` backups.
-- **05. Uninstall**: Single or batch unregister WSL distros with Double Confirm (`DELETE`) safety protection and residual folder cleanup.
-- **06. Config**: Guided configuration for global `~/.wslconfig` and per-distro `/etc/wsl.conf`. Based on official default values with colored Git Diff preview, Feilian VPN compatibility, and port forwarding isolation (`localhostForwarding`) for multi-instance Node.js development.
-- **07. Status**: Formatted dashboard showing running state, memory, and `.vhdx` disk paths/sizes for all WSL instances, with health check and process termination.
-- **08. Purge**: Full WSL environment purge and reset. Unregisters all distros, cleans storage folders, rootfs caches, and backups with Double Confirm (`PURGE`) protection and WSL stack reset.
+- **05. Uninstall**: Single or batch unregister WSL distros with `Y` + `DELETE` double confirmation. The tool relies on `wsl --unregister` and never guesses or recursively deletes a distro directory.
+- **06. Config**: Incrementally updates global `%UserProfile%\.wslconfig` and per-distro `/etc/wsl.conf`, preserving comments and unknown keys. Input is validated and changes are shown with an order-sensitive Git diff.
+- **07. Status**: Shows registered VHD paths/sizes and checks running distros for an IPv4 address, default route, and conflicting NetworkManager/systemd-networkd services.
+- **08. Purge**: Unregisters selected distros and optionally removes the toolbox image cache and exported backups, protected by `Y` + `PURGE` confirmation. Recovery data is retained if unregistering any distro fails.
 - **L. Language**: Toggle display language seamlessly between `简体中文` and `English`.
 - **0. Exit**: Exit Toolbox (Direct Enter or type 0).
+
+#### WSL configuration behavior
+
+- Press Enter or enter `--` to keep the current value. Enter `unset` to remove a key.
+- Resource settings are left unset by default so WSL can use its adaptive defaults (50% host memory, all logical processors, and swap based on the memory limit).
+- `.wslconfig` is global to all WSL 2 distros. `localhostForwarding=false` disables host localhost forwarding globally; it is not per-distro port isolation.
+- NAT remains the WSL default. Mirrored networking improves VPN and IPv6 compatibility, but inbound LAN access can still require Hyper-V firewall rules.
+- Enabling systemd triggers a warning when both NetworkManager and systemd-networkd are enabled, because they can overwrite WSL's injected `eth0` configuration.
 
 ---
 
@@ -86,3 +94,13 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
   - `wsl_status.ps1` - WSL Dashboard, Health Diagnostics & Process Manager
   - `wsl_purge.ps1` - Full WSL Environment Purge & Reset Script
   - `*.sh` - Linux Bash Installer Subcomponents
+
+## Development checks
+
+Run the dependency-free PowerShell 5.1 compatibility and configuration merge tests with:
+
+```powershell
+.\tests\wsl_logic.tests.ps1
+```
+
+WSL behavior in this toolbox follows Microsoft's documentation for [advanced configuration](https://learn.microsoft.com/windows/wsl/wsl-config), [networking](https://learn.microsoft.com/windows/wsl/networking), and [command-line operations](https://learn.microsoft.com/windows/wsl/basic-commands).
