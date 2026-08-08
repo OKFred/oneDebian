@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 # components/wsl_config.ps1
 # Description: WSL 引导式配置向导 (.wslconfig 与 wsl.conf)
 #              支持 [回车=默认值 | Tab=不填] 的高级交互逻辑、Git Diff 预览
@@ -153,7 +153,7 @@ function Configure-WslConfig {
 
     # --- 高级与实验功能 ---
     Write-Host "`n--- [3/3 高级与实验特性] ---" -ForegroundColor Yellow
-    $sparse = Read-ConfigPrompt -Message "是否启用 vhdx 磁盘自动回收 (sparseVhdx)？[true/false]" `
+    $sparse = Read-ConfigPrompt -Message "是否启用 vhdx 磁盘自动回收 (sparseVhd)？[true/false]" `
         -DefaultValue "true" `
         -HintText "强烈建议填 true。删除 WSL 内部大文件或 Docker 镜像后，自动把物理磁盘空间归还给 Windows D 盘"
 
@@ -173,7 +173,7 @@ function Configure-WslConfig {
 
     # 组装 [experimental] 节
     $expLines = @("[experimental]")
-    if ($sparse) { $expLines += "sparseVhdx=$sparse" }
+    if ($sparse) { $expLines += "sparseVhd=$sparse" }
     if ($reclaim) { $expLines += "autoMemoryReclaim=$reclaim" }
     if ($netMode) { $expLines += "networkingMode=$netMode" }
     if ($dns) { $expLines += "dnsTunneling=$dns" }
