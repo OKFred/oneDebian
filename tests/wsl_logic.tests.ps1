@@ -49,6 +49,11 @@ Assert-True ($updated.Contains('; keep this comment')) 'comment was not preserve
 Assert-True ($updated.Contains('kernel=C:\custom\kernel')) 'unknown key was not preserved'
 Assert-True ($updated.Contains('[custom]')) 'unknown section was not preserved'
 
+$crlfOriginal = "[wsl2]`r`nnetworkingMode=NAT`r`n`r`n[experimental]`r`nsparseVhd=true`r`n"
+$crlfUpdated = Set-IniValue -Content $crlfOriginal -Section 'wsl2' -Key 'dnsTunneling' -Value 'true'
+$expectedCrlf = "[wsl2]`r`nnetworkingMode=NAT`r`ndnsTunneling=true`r`n`r`n[experimental]`r`nsparseVhd=true`r`n"
+Assert-True ($crlfUpdated -ceq $expectedCrlf) 'CRLF or the blank line between sections was not preserved'
+
 $nullPromptResult = & {
     function Read-Host { param([string]$Prompt) return '' }
     Read-ConfigPrompt -Message 'test' -CurrentValue $null

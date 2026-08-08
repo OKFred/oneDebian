@@ -43,6 +43,8 @@ function Set-IniValue {
         [switch]$Remove
     )
 
+    # Preserve the source file's line endings. New Linux config files default to LF.
+    $newLine = if ($Content -match "`r`n") { "`r`n" } else { "`n" }
     $lines = New-Object System.Collections.Generic.List[string]
     if (-not [string]::IsNullOrEmpty($Content)) {
         foreach ($line in ($Content -split "`r?`n")) { $lines.Add($line) }
@@ -63,13 +65,13 @@ function Set-IniValue {
     }
 
     if ($sectionStart -lt 0) {
-        if ($Remove) { return ($lines -join "`n") }
+        if ($Remove) { return ($lines -join $newLine) }
         if ($lines.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($lines[$lines.Count - 1])) {
             $lines.Add('')
         }
         $lines.Add("[$Section]")
         $lines.Add("$Key=$Value")
-        return ($lines -join "`n")
+        return ($lines -join $newLine)
     }
 
     $escapedKey = [regex]::Escape($Key)
@@ -82,7 +84,7 @@ function Set-IniValue {
         for ($i = $keyIndexes.Count - 1; $i -ge 0; $i--) {
             $lines.RemoveAt($keyIndexes[$i])
         }
-        return ($lines -join "`n")
+        return ($lines -join $newLine)
     }
 
     if ($keyIndexes.Count -gt 0) {
@@ -91,10 +93,14 @@ function Set-IniValue {
             $lines.RemoveAt($keyIndexes[$i])
         }
     } else {
-        $lines.Insert($sectionEnd, "$Key=$Value")
+        $insertIndex = $sectionEnd
+        while ($insertIndex -gt ($sectionStart + 1) -and [string]::IsNullOrWhiteSpace($lines[$insertIndex - 1])) {
+            $insertIndex--
+        }
+        $lines.Insert($insertIndex, "$Key=$Value")
     }
 
-    return ($lines -join "`n")
+    return ($lines -join $newLine)
 }
 
 function Read-ConfigPrompt {
@@ -199,6 +205,9 @@ function Show-ConfigDiff {
             throw "Git diff failed (Exit Code: $diffExitCode)."
         }
         foreach ($line in $diffLines) {
+            if ($line.StartsWith('diff --git ') -or $line.StartsWith('index ') -or $line.StartsWith('--- ') -or $line.StartsWith('+++ ')) {
+                continue
+            }
             if ($line.StartsWith('+') -and -not $line.StartsWith('+++')) {
                 Write-Host $line -ForegroundColor Green
             } elseif ($line.StartsWith('-') -and -not $line.StartsWith('---')) {
