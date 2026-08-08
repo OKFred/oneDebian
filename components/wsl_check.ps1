@@ -19,6 +19,7 @@ function Invoke-WslPrecheck {
     $missingWslFeat = $false
     $needSetWsl2 = $false
     $hasIssue = $false
+    $unknownChecks = New-Object System.Collections.Generic.List[string]
 
     # 1. CPU 硬件虚拟化
     Write-Host "`n$(Get-I18nStr 'Check_Step1')" -ForegroundColor Yellow
@@ -39,7 +40,9 @@ function Invoke-WslPrecheck {
             $hasIssue = $true
         }
     } catch {
-        Write-Host "  [✓] CPU Check Complete." -ForegroundColor Gray
+        Write-Host "  [?] Unable to verify CPU virtualization: $($_.Exception.Message)" -ForegroundColor Yellow
+        $unknownChecks.Add('CPU virtualization')
+        $hasIssue = $true
     }
 
 
@@ -65,7 +68,9 @@ function Invoke-WslPrecheck {
             $hasIssue = $true
         }
     } catch {
-        Write-Host "  [!] Administrator privileges required for full Windows optional feature details." -ForegroundColor Gray
+        Write-Host "  [?] Unable to verify Windows optional features: $($_.Exception.Message)" -ForegroundColor Yellow
+        $unknownChecks.Add('Windows optional features')
+        $hasIssue = $true
     }
 
     # 3. WSL2 服务堆栈与默认版本检查
@@ -74,7 +79,8 @@ function Invoke-WslPrecheck {
     if ($wslExe) {
         Write-Host "  [✓] wsl.exe: $(if ($global:CurrentLang -eq 'zh-CN') { '已就绪' } else { 'Ready' })" -ForegroundColor Green
         $wslStatus = & wsl.exe --status 2>$null
-        if ($wslStatus) {
+        $wslStatusExitCode = $LASTEXITCODE
+        if ($wslStatusExitCode -eq 0 -and $wslStatus) {
             $statusText = ($wslStatus | ForEach-Object { $_ -replace "`0", "" }) -join "`n"
             if ($statusText -match "Default Version:\s*2" -or $statusText -match "默认版本:\s*2") {
                 Write-Host "  [✓] WSL Default Version: 2" -ForegroundColor Green
@@ -83,6 +89,10 @@ function Invoke-WslPrecheck {
                 $needSetWsl2 = $true
                 $hasIssue = $true
             }
+        } else {
+            Write-Host "  [?] Unable to query WSL status (Exit Code: $wslStatusExitCode)." -ForegroundColor Yellow
+            $unknownChecks.Add('WSL service status')
+            $hasIssue = $true
         }
     } else {
         Write-Host "  [!] wsl.exe not found!" -ForegroundColor Red
@@ -121,7 +131,12 @@ function Invoke-WslPrecheck {
             Write-Host "  [✓] Disk ${driveLetter}:\ Free Space: $freeGB GB" -ForegroundColor Green
         } else {
             Write-Host "  [!] Warning: Disk ${driveLetter}:\ Free Space ($freeGB GB) < 10GB." -ForegroundColor Yellow
+            $hasIssue = $true
         }
+    } else {
+        Write-Host "  [?] Unable to query free space for drive ${driveLetter}:." -ForegroundColor Yellow
+        $unknownChecks.Add("Drive ${driveLetter}: free space")
+        $hasIssue = $true
     }
 
     # 诊断总结与交互式修复选项
@@ -134,7 +149,11 @@ function Invoke-WslPrecheck {
         return
     }
 
-    Write-Host " ⚠️ $(if ($global:CurrentLang -eq 'zh-CN') { '检测到部分系统虚拟化组件未就绪。所需的修复命令如下:' } else { 'Some features are missing. Required fix commands:' })" -ForegroundColor Red
+    Write-Host " ⚠️ $(if ($global:CurrentLang -eq 'zh-CN') { '检测到问题或存在无法验证的检查项。' } else { 'Issues or unverifiable checks were detected.' })" -ForegroundColor Red
+
+    if ($unknownChecks.Count -gt 0) {
+        Write-Host "   $(if ($global:CurrentLang -eq 'zh-CN') { '无法验证' } else { 'Unable to verify' }): $($unknownChecks -join ', ')" -ForegroundColor Yellow
+    }
     
     if ($missingVmp) {
         Write-Host "   • dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart" -ForegroundColor Yellow
@@ -144,6 +163,12 @@ function Invoke-WslPrecheck {
     }
     if ($needSetWsl2) {
         Write-Host "   • wsl --set-default-version 2" -ForegroundColor Yellow
+    }
+
+    $hasAutomatedFix = $missingVmp -or $missingWslFeat -or $needSetWsl2
+    if (-not $hasAutomatedFix) {
+        Write-Host "`nNo safe automated fix is available for the reported checks." -ForegroundColor Gray
+        return
     }
 
     Write-Host "`n[Y] $(if ($global:CurrentLang -eq 'zh-CN') { '自动帮忙执行修复 (需要管理员权限)' } else { 'Auto-execute fixes for me (Admin required)' })" -ForegroundColor Green
@@ -158,11 +183,25 @@ function Invoke-WslPrecheck {
         }
 
         Write-Host "`nAuto executing DISM fixes..." -ForegroundColor Green
-        if ($missingVmp) { & dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart }
-        if ($missingWslFeat) { & dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart }
-        if ($needSetWsl2) { & wsl.exe --set-default-version 2 }
+        $fixFailed = $false
+        if ($missingVmp) {
+            & dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+            if ($LASTEXITCODE -ne 0) { $fixFailed = $true }
+        }
+        if ($missingWslFeat) {
+            & dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+            if ($LASTEXITCODE -ne 0) { $fixFailed = $true }
+        }
+        if ($needSetWsl2) {
+            & wsl.exe --set-default-version 2
+            if ($LASTEXITCODE -ne 0) { $fixFailed = $true }
+        }
 
-        Write-Host "`n[✓] Fixes deployed! Please reboot Windows if required." -ForegroundColor Green
+        if ($fixFailed) {
+            Write-Host "`n[!] One or more fixes failed. Review the command output above." -ForegroundColor Red
+        } else {
+            Write-Host "`n[✓] Fixes deployed! Please reboot Windows if required." -ForegroundColor Green
+        }
     } else {
         Write-Host "`n$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
     }

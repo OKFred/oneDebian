@@ -31,7 +31,20 @@ $suite = if ($Version -eq 12) { 'bookworm' } else { 'trixie' }
 $archiveDir = Join-Path $WslRoot 'images'
 $archivePath = Join-Path $archiveDir "debian-$Version-rootfs.tar.xz"
 $installPath = Join-Path $WslRoot $DistroName
-$imageDirectory = "https://images.linuxcontainers.org/images/debian/$suite/amd64/default/"
+$windowsArchitecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+$normalizedArchitecture = if ($windowsArchitecture) { $windowsArchitecture.ToUpperInvariant() } else { '' }
+$imageArchitecture = switch ($normalizedArchitecture) {
+    'AMD64' { 'amd64' }
+    'ARM64' { 'arm64' }
+    default { $null }
+}
+
+if (-not $imageArchitecture) {
+    Write-Host "[!] Unsupported Windows architecture: $windowsArchitecture" -ForegroundColor Red
+    return
+}
+
+$imageDirectory = "https://images.linuxcontainers.org/images/debian/$suite/$imageArchitecture/default/"
 
 try {
     # 1. 检查目标发行版或安装路径是否已存在
@@ -49,8 +62,8 @@ try {
 
     New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null
 
-    # 2. 获取官网最新构建地址
-    Write-Host "$(if ($global:CurrentLang -eq 'zh-CN') { "正在获取 Debian $Version 官方镜像列表..." } else { "Fetching Debian $Version official image list..." })" -ForegroundColor Green
+    # 2. 获取 Linux Containers 镜像服务的最新构建地址
+    Write-Host "$(if ($global:CurrentLang -eq 'zh-CN') { "正在获取 Linux Containers 的 Debian $Version 镜像列表..." } else { "Fetching Debian $Version image list from Linux Containers..." })" -ForegroundColor Green
     $listing = (& curl.exe -fLs $imageDirectory) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { '错误: 无法下载 Debian 镜像目录列表，请检查网络连接。' } else { 'Error: Failed to fetch image list, check network.' })" -ForegroundColor Red
@@ -83,6 +96,11 @@ try {
         }
     }
 
+    if (-not $expectedHash) {
+        Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { '无法获取 rootfs 的 SHA-256 校验和，已中止安装，避免使用未验证镜像。' } else { 'Unable to obtain the rootfs SHA-256 checksum. Installation aborted to avoid an unverified image.' })" -ForegroundColor Red
+        return
+    }
+
     # 3. 判断本地缓存是否完好
     $useCache = $false
     if (Test-Path -LiteralPath $archivePath) {
@@ -93,11 +111,6 @@ try {
             } else {
                 Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { '检测到本地缓存已被破坏或过期，准备重新下载干净镜像...' } else { 'Local cache invalid, redownloading...' })" -ForegroundColor Yellow
                 Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
-            }
-        } else {
-            # 如果获取不到 SHA256，退回文件大小判断 (必须 > 20MB)
-            if ((Get-Item -LiteralPath $archivePath).Length -gt 20MB) {
-                $useCache = $true
             }
         }
     }
@@ -130,7 +143,7 @@ try {
             return
         }
 
-        Write-Host "[2/3] $(if ($global:CurrentLang -eq 'zh-CN') { '正在校验 SHA-256 签名完整性...' } else { 'Verifying SHA-256 checksum...' })" -ForegroundColor Green
+        Write-Host "[2/3] $(if ($global:CurrentLang -eq 'zh-CN') { '正在校验 SHA-256 完整性校验和...' } else { 'Verifying SHA-256 checksum...' })" -ForegroundColor Green
         if ($expectedHash) {
             $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToUpperInvariant()
             if ($expectedHash -ne $actualHash) {

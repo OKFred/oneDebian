@@ -24,7 +24,8 @@ function Invoke-WslRestore {
 
     if (Test-Path -LiteralPath $backupDir) {
         $backupFiles = @(Get-ChildItem -Path $backupDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Extension -in '.tar', '.gz', '.vhdx', '.xz' })
+            Where-Object { $_.Name -match '(?i)\.(?:tar|tar\.gz|tar\.xz|vhdx)$' } |
+            Sort-Object LastWriteTime -Descending)
 
         if ($backupFiles.Count -gt 0) {
             Write-Host "`n=== $(if ($global:CurrentLang -eq 'zh-CN') { '扫描到的本地备份文件列表' } else { 'Detected Local Backup Files' }) ===" -ForegroundColor Cyan
@@ -58,9 +59,15 @@ function Invoke-WslRestore {
         $selectedFile = $fileInput
     }
 
+    if ((Get-Item -LiteralPath $selectedFile).Name -notmatch '(?i)\.(?:tar|tar\.gz|tar\.xz|vhdx)$') {
+        Write-Host "`n[!] Unsupported backup format. Use .tar, .tar.gz, .tar.xz, or .vhdx." -ForegroundColor Red
+        return
+    }
+
     # 3. 智能推导默认发行版名称
     $fileItem = Get-Item -LiteralPath $selectedFile
-    $defaultDistroName = $fileItem.BaseName -replace '-backup.*$', '' -replace '[^a-zA-Z0-9._-]', ''
+    $baseNameWithoutArchiveExtension = $fileItem.Name -replace '(?i)\.(?:tar|tar\.gz|tar\.xz|vhdx)$', ''
+    $defaultDistroName = $baseNameWithoutArchiveExtension -replace '-backup.*$', '' -replace '[^a-zA-Z0-9._-]', ''
     if (-not $defaultDistroName) { $defaultDistroName = "Debian-Restored" }
 
     $distroInput = Read-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "输入还原后的 WSL 发行版名称 (按回车默认 '$defaultDistroName')" } else { "Enter restored WSL distro name (Default '$defaultDistroName')" })"
@@ -95,15 +102,17 @@ function Invoke-WslRestore {
         return
     }
 
-    # 6. 执行导入还原
-    if (-not (Test-Path -LiteralPath $installDir)) {
-        New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-    }
-
+    # 6. 执行导入还原。VHDX 使用 --import --vhd 复制到目标目录，避免把备份文件直接注册为运行磁盘。
     Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "正在导入备份还原 WSL 发行版 '$distroName'..." } else { "Importing backup restore '$distroName'..." })" -ForegroundColor Green
 
+    $createdInstallDir = $false
+    if (-not (Test-Path -LiteralPath $installDir)) {
+        New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+        $createdInstallDir = $true
+    }
+
     if ($selectedFile.EndsWith('.vhdx', [System.StringComparison]::OrdinalIgnoreCase)) {
-        & wsl.exe --import-in-place $distroName $selectedFile
+        & wsl.exe --import $distroName $installDir $selectedFile --vhd
     } else {
         & wsl.exe --import $distroName $installDir $selectedFile --version 2
     }
@@ -114,6 +123,12 @@ function Invoke-WslRestore {
         Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "启动该发行版命令: wsl -d $distroName" } else { "Launch command: wsl -d $distroName" })" -ForegroundColor Yellow
     } else {
         Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { "导入失败 (Exit Code: $LASTEXITCODE)。" } else { "Import failed (Exit Code: $LASTEXITCODE)." })" -ForegroundColor Red
+        if ($createdInstallDir -and (Test-Path -LiteralPath $installDir)) {
+            $remainingItems = @(Get-ChildItem -LiteralPath $installDir -Force -ErrorAction SilentlyContinue)
+            if ($remainingItems.Count -eq 0) {
+                Remove-Item -LiteralPath $installDir -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 

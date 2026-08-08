@@ -7,24 +7,31 @@
 function Get-WslDistros {
     $distros = New-Object System.Collections.Generic.List[string]
 
-    try {
-        $raw = & wsl.exe --list --quiet 2>$null
-        if ($raw) {
-            $lines = ($raw | Out-String) -replace "`0", "" -split "`r?`n"
-            foreach ($line in $lines) {
-                $name = $line.Trim()
-                # 过滤无已安装分发时的系统提示词条
-                if ($name -and 
-                    $name -ne 'NAME' -and 
-                    $name -notlike '*no installed distributions*' -and 
-                    $name -notlike '*没有已安装的分发*' -and 
-                    $name -notlike '*Use *wsl.exe*' -and 
-                    -not $distros.Contains($name)) {
-                    $distros.Add($name)
-                }
+    if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+        throw 'wsl.exe not found. Install or enable Windows Subsystem for Linux first.'
+    }
+
+    $raw = & wsl.exe --list --quiet 2>$null
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Unable to query WSL distributions (Exit Code: $exitCode)."
+    }
+
+    if ($raw) {
+        $lines = ($raw | Out-String) -replace "`0", "" -split "`r?`n"
+        foreach ($line in $lines) {
+            $name = $line.Trim()
+            # 过滤无已安装分发时的系统提示词条
+            if ($name -and
+                $name -ne 'NAME' -and
+                $name -notlike '*no installed distributions*' -and
+                $name -notlike '*没有已安装的分发*' -and
+                $name -notlike '*Use *wsl.exe*' -and
+                -not $distros.Contains($name)) {
+                $distros.Add($name)
             }
         }
-    } catch {}
+    }
 
     # 返回纯粹打平的一维字符串数组
     return [string[]]$distros.ToArray()
