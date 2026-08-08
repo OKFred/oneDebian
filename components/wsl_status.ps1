@@ -86,14 +86,22 @@ function Show-WslDashboard {
         if ($target) {
             Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "正在停止发行版: $target ..." } else { "Stopping $target ..." })" -ForegroundColor Yellow
             & wsl.exe --terminate $target
-            Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { "已成功停止 $target" } else { "Terminated $target successfully." })" -ForegroundColor Green
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { "已成功停止 $target" } else { "Terminated $target successfully." })" -ForegroundColor Green
+            } else {
+                Write-Host "[!] Failed to terminate $target (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+            }
         }
     } elseif ($opChoice -in 'S', 's') {
         $confirm = Read-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { '确认要执行全局 wsl --shutdown 重启 WSL 吗？所有运行中的 WSL 将被关闭！[Y/N]' } else { 'Confirm execute global wsl --shutdown? All running WSL instances will be stopped! [Y/N]' })"
         if ($confirm -in 'Y', 'y') {
             Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { '正在执行全局 shutdown...' } else { 'Shutting down WSL ...' })" -ForegroundColor Red
             & wsl.exe --shutdown
-            Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { '全局 WSL 堆栈已关闭重置。' } else { 'Global WSL shutdown complete.' })" -ForegroundColor Green
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { '全局 WSL 堆栈已关闭重置。' } else { 'Global WSL shutdown complete.' })" -ForegroundColor Green
+            } else {
+                Write-Host "[!] WSL shutdown failed (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+            }
         }
     }
 }

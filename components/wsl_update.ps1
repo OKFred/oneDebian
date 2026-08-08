@@ -26,14 +26,22 @@ function Invoke-WslUpdate {
         if ($confirm -in 'Y', 'y') {
             Write-Host "`nExecuting: apt-get update && apt-get dist-upgrade -y in $targetDistro ..." -ForegroundColor Green
             & wsl.exe -d $targetDistro -u root -- bash -c "apt-get update && apt-get dist-upgrade -y"
-            Write-Host "`n[✓] Update complete!" -ForegroundColor Green
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "`n[✓] Update complete!" -ForegroundColor Green
+            } else {
+                Write-Host "`n[!] Package update failed (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+            }
         }
     } elseif ($choice -in '2', '02') {
         $confirm = Read-Host "`nExecuting wsl --update. $(Get-I18nStr 'Update_Confirm_Prompt')"
         if ($confirm -in 'Y', 'y') {
             Write-Host "`nExecuting: wsl --update ..." -ForegroundColor Green
             & wsl.exe --update
-            Write-Host "`n[✓] WSL core update complete!" -ForegroundColor Green
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "`n[✓] WSL core update complete!" -ForegroundColor Green
+            } else {
+                Write-Host "`n[!] WSL core update failed (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+            }
         }
     } else {
         Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice')" -ForegroundColor Red

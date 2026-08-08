@@ -1,6 +1,6 @@
 ﻿# ==============================================================================
 # components/wsl_purge.ps1
-# Description: 08. WSL 环境全量彻底清理与重置 (单次 Y/N 确认，防误输入)
+# Description: 08. WSL 环境全量彻底清理与重置 (Y/N + PURGE 双重确认)
 # Author: Fred
 # ==============================================================================
 
@@ -55,7 +55,7 @@ function Invoke-WslPurge {
         return
     }
 
-    # 确认清理（单次 Y/N 确认）
+    # 清理是不可恢复操作，要求二次输入确认令牌。
     Write-Host "`n==========================================" -ForegroundColor Red
     Write-Host "       $(Get-I18nStr 'Purge_Warn')       " -ForegroundColor Red
     Write-Host "==========================================" -ForegroundColor Red
@@ -77,33 +77,63 @@ function Invoke-WslPurge {
         return
     }
 
+    $confirmToken = Read-Host "请输入 PURGE 以进行最终确认"
+    if ($confirmToken -cne 'PURGE') {
+        Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
+        return
+    }
+
     # 执行清理
     Write-Host "`n$(Get-I18nStr 'Purge_Shutting_Down')" -ForegroundColor Red
     & wsl.exe --shutdown 2>$null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[!] WSL shutdown failed (Exit Code: $LASTEXITCODE). Purge aborted." -ForegroundColor Red
+        return
+    }
+
+    $failedDistros = New-Object System.Collections.Generic.List[string]
 
     foreach ($d in $targetDistros) {
         Write-Host "`n[1/3] $(Get-I18nStr 'Purge_Unregistering'): $d ..." -ForegroundColor Red
         & wsl.exe --unregister $d 2>$null
 
-        $distroDir = Join-Path $DefaultWslRoot $d
-        if (Test-Path -LiteralPath $distroDir) {
-            Write-Host "     $(Get-I18nStr 'Purge_Deleting_Dir'): $distroDir ..." -ForegroundColor Yellow
-            Remove-Item -LiteralPath $distroDir -Recurse -Force 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            $failedDistros.Add([string]$d)
+            Write-Host "[!] Failed to unregister $d (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+        } else {
+            Write-Host "[✓] Unregistered $d." -ForegroundColor Green
         }
     }
 
-    if ($cleanImages -and (Test-Path -LiteralPath $archiveDir)) {
-        Write-Host "`n[2/3] $(Get-I18nStr 'Purge_Deleting_Cache_Dir'): $archiveDir ..." -ForegroundColor Red
-        Remove-Item -LiteralPath $archiveDir -Recurse -Force 2>$null
+    if ($failedDistros.Count -gt 0) {
+        Write-Host "`n[!] Some distributions could not be unregistered: $($failedDistros -join ', ')" -ForegroundColor Red
+        Write-Host "    Image and backup cleanup was skipped to preserve recovery data." -ForegroundColor Yellow
+        return
     }
 
-    if ($cleanBackups -and (Test-Path -LiteralPath $backupDir)) {
-        Write-Host "`n[3/3] $(Get-I18nStr 'Purge_Deleting_Backup_Dir'): $backupDir ..." -ForegroundColor Red
-        Remove-Item -LiteralPath $backupDir -Recurse -Force 2>$null
+    try {
+        if ($cleanImages -and (Test-Path -LiteralPath $archiveDir)) {
+            Write-Host "`n[2/3] $(Get-I18nStr 'Purge_Deleting_Cache_Dir'): $archiveDir ..." -ForegroundColor Red
+            Remove-Item -LiteralPath $archiveDir -Recurse -Force -ErrorAction Stop
+        }
+
+        if ($cleanBackups -and (Test-Path -LiteralPath $backupDir)) {
+            Write-Host "`n[3/3] $(Get-I18nStr 'Purge_Deleting_Backup_Dir'): $backupDir ..." -ForegroundColor Red
+            Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction Stop
+        }
+    } catch {
+        Write-Host "`n[!] Cleanup failed: $($_.Exception.Message)" -ForegroundColor Red
+        return
     }
 
     Write-Host "`n$(Get-I18nStr 'Purge_Resetting_Stack')" -ForegroundColor Green
     & wsl.exe --shutdown 2>$null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[!] Final WSL shutdown failed (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+        return
+    }
 
     Write-Host "`n==========================================" -ForegroundColor Green
     Write-Host "       [✓] $(Get-I18nStr 'Purge_Success')       " -ForegroundColor Green
