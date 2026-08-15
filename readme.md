@@ -69,6 +69,7 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 6. **Install Docker Environment**: Deploy Docker Engine, Compose, and Portainer UI.
 7. **Project Deployment**: Pull and deploy Node.js / Web projects.
 8. **Disk Partition, Format & Mount**: Automated disk formatting & mounting.
+9. **Install a Desktop Environment**: Choose XFCE, LXQt, MATE, GNOME, or KDE Plasma, with optional xrdp remote desktop setup.
 10. **Upgrade to Latest Linux Kernel Image**.
 11. **Remove Unused Linux Kernel Images**.
 

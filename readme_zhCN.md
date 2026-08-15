@@ -69,6 +69,7 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 6. **安装 Docker 容器环境**：快速部署 Docker, Docker Compose 与 Portainer 管理面板。
 7. **项目部署**：快速拉取与构建 Node.js/Web 项目。
 8. **磁盘分区与格式化**：自动化磁盘挂载。
+9. **安装桌面环境**：可选 XFCE、LXQt、MATE、GNOME 或 KDE Plasma，并可选择安装 xrdp 远程桌面。
 10. **更新到新版 Linux 内核**。
 11. **清理未使用的 Linux 镜像缓存**。
 
