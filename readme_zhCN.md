@@ -72,6 +72,17 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 9. **安装桌面环境**：可选 XFCE、LXQt、MATE、GNOME 或 KDE Plasma，并可选择安装 xrdp 远程桌面。
 10. **更新到新版 Linux 内核**。
 11. **清理未使用的 Linux 镜像缓存**。
+12. **Cockpit 文件浏览器**：在 Cockpit 内安装文件管理组件（Files 或 Navigator）。
+13. **Cockpit SMB 文件共享**：安装 Samba 和 Cockpit File Sharing，在 Cockpit 内管理 SMB 共享。
+
+#### Cockpit 文件管理与 SMB
+
+在仓库目录运行 `sudo bash menu.sh`，选择 **12** 或 **13** 并确认安装。两项都会按需安装 Cockpit、启用 `cockpit.socket`。访问 `https://服务器IP:9090`，使用已有 Linux 账号登录，刷新页面即可看到新侧栏入口；需要管理权限时在 Cockpit 中启用管理访问。
+
+- **12 — 文件浏览器**：当前 APT 软件源中的 `cockpit-files` 候选版本不低于 45 时优先安装；否则校验 SHA256 后安装固定的 [45Drives Navigator v0.5.14-1](https://github.com/45Drives/cockpit-navigator/releases/tag/v0.5.14-1) 源码发行包，无需 Node.js 构建。已有 Navigator 文件会保留。此回退方式属于手动安装，不通过 APT 自动更新。
+- **13 — File Sharing / 文件共享 → Samba**：安装与系统匹配且经过 SHA256 校验的 [45Drives File Sharing v4.6.3](https://github.com/45Drives/cockpit-file-sharing/releases/tag/v4.6.3) 软件包，支持 **Debian 12/13、Ubuntu 20.04/22.04**。其他版本会明确停止，不混用其他发行版的软件包。插件还依赖 NFS 软件包。脚本不添加第三方 APT 源，因此下载的插件不会自动获得上游更新；已安装的更新版本会保留。
+- SMB 安装前备份已有 `/etc/samba/smb.conf` 并保留原配置。安装会启用 `smbd`，共享目录和密码由用户在界面中设置。在 Samba 页面如提示配置问题，点击 **Fix now** 启用 registry，然后添加共享，并通过 **Manage Samba Passwords** 为已有 Linux 用户设置 SMB 密码。原配置文件中的共享继续有效；需要在界面中管理时，再选择 Import 并确认导入。详见[上游使用说明](https://github.com/45Drives/cockpit-file-sharing#usage)。
+- 这两项要求 root 权限、APT 和运行中的 systemd，保留 Cockpit 登录限制及防火墙规则。请按需要的网络范围放行 Cockpit TCP **9090**、SMB TCP **445**；Windows 访问路径为 `\\服务器IP\共享名`。
 
 ---
 
@@ -102,6 +113,13 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 
 ```powershell
 .\tests\wsl_logic.tests.ps1
+```
+
+无需实际安装软件或修改服务，即可验证 Cockpit 安装逻辑：
+
+```bash
+bash -n menu.sh && bash -n components/the_cockpit_extensions_installation.sh
+bash tests/cockpit_extensions.tests.sh
 ```
 
 本工具的 WSL 行为以微软官方的[高级配置](https://learn.microsoft.com/windows/wsl/wsl-config)、[网络说明](https://learn.microsoft.com/windows/wsl/networking)和[命令行操作](https://learn.microsoft.com/windows/wsl/basic-commands)文档为准。

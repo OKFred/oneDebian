@@ -72,6 +72,17 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 9. **Install a Desktop Environment**: Choose XFCE, LXQt, MATE, GNOME, or KDE Plasma, with optional xrdp remote desktop setup.
 10. **Upgrade to Latest Linux Kernel Image**.
 11. **Remove Unused Linux Kernel Images**.
+12. **Cockpit File Browser**: Install file management inside Cockpit (Files or Navigator).
+13. **Cockpit SMB File Sharing**: Install Samba and Cockpit File Sharing to manage SMB shares in Cockpit.
+
+#### Cockpit file management and SMB
+
+Run `sudo bash menu.sh` in the repository and select **12** or **13**, then confirm installation. Both entries install Cockpit if needed and enable `cockpit.socket`. Open `https://SERVER-IP:9090`, sign in with an existing Linux account, and refresh the page to see the new sidebar entry. Enable administrative access in Cockpit when needed.
+
+- **12 — File browser** uses `cockpit-files` from the configured APT repositories when its candidate version is at least 45. Otherwise it installs the fixed [45Drives Navigator v0.5.14-1](https://github.com/45Drives/cockpit-navigator/releases/tag/v0.5.14-1) source distribution after SHA256 verification; this needs no Node.js build. Existing Navigator files are preserved. This fallback is a manual installation, so it does not receive APT updates.
+- **13 — File Sharing → Samba** uses the matching, SHA256-verified [45Drives File Sharing v4.6.3](https://github.com/45Drives/cockpit-file-sharing/releases/tag/v4.6.3) package for **Debian 12/13 or Ubuntu 20.04/22.04**. Other releases stop with an explanation instead of using another distribution's package. The plugin also requires NFS packages. No third-party APT repository is added, so the downloaded plugin does not receive automatic upstream updates; newer installed plugin versions are retained.
+- SMB installation backs up an existing `/etc/samba/smb.conf` and preserves its configuration. It enables `smbd`, but does not create shares or set passwords. On the Samba page, click **Fix now** if prompted to enable registry configuration, add a share, and use **Manage Samba Passwords** for an existing Linux user. Existing file-based shares remain available; importing them into the UI is a separate, confirmed operation. See the [upstream usage guide](https://github.com/45Drives/cockpit-file-sharing#usage).
+- These entries require root, APT, and running systemd. They preserve Cockpit login restrictions and firewall rules. Allow TCP **9090** for Cockpit and **445** for SMB within the intended network; Windows clients connect to `\\SERVER-IP\SHARE`.
 
 ---
 
@@ -102,6 +113,13 @@ Run the dependency-free PowerShell 5.1 compatibility and configuration merge tes
 
 ```powershell
 .\tests\wsl_logic.tests.ps1
+```
+
+Check the Cockpit installers without installing packages or changing services:
+
+```bash
+bash -n menu.sh && bash -n components/the_cockpit_extensions_installation.sh
+bash tests/cockpit_extensions.tests.sh
 ```
 
 WSL behavior in this toolbox follows Microsoft's documentation for [advanced configuration](https://learn.microsoft.com/windows/wsl/wsl-config), [networking](https://learn.microsoft.com/windows/wsl/networking), and [command-line operations](https://learn.microsoft.com/windows/wsl/basic-commands).

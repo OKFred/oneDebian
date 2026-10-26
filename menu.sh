@@ -5,11 +5,15 @@
 
 #文件依赖
 #⚠️import--需要引入包含函数的文件
+# 从其他目录启动时，仍从本仓库加载组件。
+MENU_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+cd -- "$MENU_DIR" || exit 1
 source ./components/the_repo_localization.sh
 source ./components/the_basic_setup.sh
 source ./components/the_ssh_configuration.sh
 source ./components/the_node_installation.sh
 source ./components/the_cockpit_installation.sh
+source ./components/the_cockpit_extensions_installation.sh
 source ./components/the_docker_installation.sh
 source ./components/the_deployment.sh
 source ./components/the_disk_format_and_mount.sh
@@ -45,6 +49,8 @@ main() {
     echo "09. desktop environment--安装桌面环境，可选安装xrdp"
     echo "10. the latest image updater--更新到新版的linux镜像"
     echo "11. the unused image removal--清理未使用的linux版本镜像"
+    echo "12. Cockpit file browser--一键安装Cockpit文件浏览器"
+    echo "13. Cockpit SMB sharing--一键安装Cockpit SMB文件共享"
     echo "99. about--关于"
     echo "00. exit--退出"
     echo
@@ -62,7 +68,9 @@ main() {
     09 | 9) the_desktop_environment_installation ;;
     10) the_latest_image_updater ;;
     11) the_unused_image_removal ;;
-    99) nano readme.md ;;
+    12) the_cockpit_file_browser_installation ;;
+    13) the_cockpit_smb_installation ;;
+    99) nano "$MENU_DIR/readme.md" ;;
     00 | 0 | "") exit 1 ;;
     u) echo "???" ;;
     *) echo "error input--输入有误，请重新输入！" && menu_back ;;
