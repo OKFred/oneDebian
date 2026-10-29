@@ -1,191 +1,230 @@
 ﻿# ==============================================================================
 # components/wsl_status.ps1
-# Description: 07. WSL 运维诊断与实例状态仪表盘 (100% 全量双语 i18n 兼容)
+# Description: Compact WSL inventory and per-instance lifecycle controls.
 # ==============================================================================
 
 param(
-    [string]$DefaultWslRoot = 'D:\wsl'
+    [string]$DefaultWslRoot = 'D:\wsl',
+    [switch]$NoRun
 )
 
 . "$PSScriptRoot\wsl_i18n.ps1"
 . "$PSScriptRoot\wsl_common.ps1"
+. "$PSScriptRoot\wsl_lifecycle.ps1"
+. "$PSScriptRoot\wsl_status_data.ps1"
 
-function Get-WslDistroStorageInfo {
-    param([string]$DistroName)
-
-    $lxssRoot = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
-    if (-not (Test-Path $lxssRoot)) { return $null }
-
-    foreach ($key in (Get-ChildItem $lxssRoot -ErrorAction SilentlyContinue)) {
-        $properties = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue
-        if (-not $properties -or $properties.DistributionName -cne $DistroName) { continue }
-
-        $basePath = [Environment]::ExpandEnvironmentVariables([string]$properties.BasePath)
-        if (-not $basePath) { return $null }
-
-        $vhdName = if ($properties.VhdFileName) { [string]$properties.VhdFileName } else { 'ext4.vhdx' }
-        $vhdPath = Join-Path $basePath $vhdName
-        if (-not (Test-Path -LiteralPath $vhdPath)) {
-            $vhdPath = Get-ChildItem -LiteralPath $basePath -Filter '*.vhdx' -File -ErrorAction SilentlyContinue |
-                Select-Object -First 1 -ExpandProperty FullName
-        }
-
-        if ($vhdPath -and (Test-Path -LiteralPath $vhdPath)) {
-            $vhd = Get-Item -LiteralPath $vhdPath
-            return [pscustomobject]@{ Path = $vhd.FullName; Length = $vhd.Length }
-        }
-        return $null
+function Get-WslStatusTextWidth {
+    param([AllowEmptyString()][string]$Text)
+    $width = 0
+    foreach ($character in $Text.ToCharArray()) {
+        $code = [int]$character
+        if (($code -ge 0x1100 -and $code -le 0x115F) -or
+            ($code -ge 0x2E80 -and $code -le 0xA4CF) -or
+            ($code -ge 0xAC00 -and $code -le 0xD7A3) -or
+            ($code -ge 0xF900 -and $code -le 0xFAFF) -or
+            ($code -ge 0xFE10 -and $code -le 0xFE6F) -or
+            ($code -ge 0xFF00 -and $code -le 0xFF60) -or
+            ($code -ge 0xFFE0 -and $code -le 0xFFE6)) { $width += 2 }
+        else { $width++ }
     }
+    return $width
+}
 
-    return $null
+function Format-WslStatusCell {
+    param([AllowEmptyString()][string]$Text, [int]$Width)
+    if ((Get-WslStatusTextWidth $Text) -gt $Width) {
+        $short = ''
+        foreach ($character in $Text.ToCharArray()) {
+            if ((Get-WslStatusTextWidth ($short + $character)) -gt ($Width - 1)) { break }
+            $short += $character
+        }
+        $Text = $short + '…'
+    }
+    return $Text + (' ' * [Math]::Max(0, ($Width - (Get-WslStatusTextWidth $Text))))
+}
+
+function Format-WslStatusSize {
+    param($Bytes)
+    if ($null -eq $Bytes) { return '-' }
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    if ($Bytes -ge 1TB) { return ([double]$Bytes / 1TB).ToString('0.##', $culture) + 'T' }
+    if ($Bytes -ge 1GB) { return ([double]$Bytes / 1GB).ToString('0.##', $culture) + 'G' }
+    if ($Bytes -ge 1MB) { return ([double]$Bytes / 1MB).ToString('0.#', $culture) + 'M' }
+    if ($Bytes -ge 1KB) { return ([double]$Bytes / 1KB).ToString('0', $culture) + 'K' }
+    return [string]$Bytes
+}
+
+function Format-WslStatusFlag {
+    param($Value)
+    if ($null -eq $Value) { return Get-I18nStr 'Status_Unknown' }
+    if ($Value) { return Get-I18nStr 'Status_Yes' }
+    return Get-I18nStr 'Status_No'
+}
+
+function Show-WslStatusTable {
+    param([AllowEmptyCollection()][object[]]$Rows = @())
+    $widths = @(2, 20, 4, 17, 7, 7, 4, 4)
+    $headers = @((Get-I18nStr 'Status_Header') -split '\|' | ForEach-Object { $_.Trim() })
+    $rule = ' ' + ('-' * 86)
+    Write-Host $rule -ForegroundColor Gray
+    $cells = for ($column = 0; $column -lt $widths.Count; $column++) {
+        Format-WslStatusCell -Text $headers[$column] -Width $widths[$column]
+    }
+    Write-Host (' ' + ($cells -join ' | ')) -ForegroundColor Cyan
+    Write-Host $rule -ForegroundColor Gray
+    for ($index = 0; $index -lt $Rows.Count; $index++) {
+        $row = $Rows[$index]
+        $created = '-'
+        if ($null -ne $row.Created) {
+            try {
+                $created = ([datetime]$row.Created).ToString('yyyy-MM-dd HH:mm')
+                if ($row.CreatedSource -eq 'Storage') { $created = '~' + $created }
+            } catch { $created = '-' }
+        }
+        $uptime = '-'
+        if ($row.State -eq 'Running' -and $null -ne $row.UptimeSeconds) {
+            $uptime = Format-WslStatusDuration -Seconds $row.UptimeSeconds
+        }
+        $stateKey = switch ($row.State) {
+            'Running' { 'Status_StateRunning' }
+            'Stopped' { 'Status_StateStopped' }
+            default { 'Status_StateUnknown' }
+        }
+        $values = @(
+            [string]($index + 1), [string]$row.Name, (Get-I18nStr $stateKey), $created,
+            $uptime, (Format-WslStatusSize $row.SizeBytes),
+            (Format-WslStatusFlag $row.Autostart), (Format-WslStatusFlag $row.KeepAlive)
+        )
+        $cells = for ($column = 0; $column -lt $widths.Count; $column++) {
+            Format-WslStatusCell -Text $values[$column] -Width $widths[$column]
+        }
+        $colour = switch ($row.State) { 'Running' { 'Green' }; 'Stopped' { 'Gray' }; default { 'Yellow' } }
+        Write-Host (' ' + ($cells -join ' | ')) -ForegroundColor $colour
+    }
+    Write-Host $rule -ForegroundColor Gray
+    if (@($Rows | Where-Object { $_.CreatedSource -eq 'Storage' }).Count -gt 0) {
+        Write-Host (' ' + (Get-I18nStr 'Status_CreatedApprox')) -ForegroundColor Gray
+    }
+}
+
+function Test-WslStatusRunning {
+    param([string]$DistroName)
+    $result = Invoke-WslCommand -Arguments @('--list', '--running', '--quiet') -TimeoutMilliseconds 15000
+    if ($result.ExitCode -ne 0 -or -not $result.IsDecoded) { return $false }
+    $names = @($result.Text -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    return $names -ccontains $DistroName
 }
 
 function Show-WslNetworkHealth {
     param([string]$DistroName)
-
+    # Recheck before entering a distribution; a stopped/unknown distro is not probed.
+    if (-not (Test-WslStatusRunning -DistroName $DistroName)) { return }
     $probeScript = 'echo __IPV4__; ip -4 -brief address show dev eth0 scope global 2>/dev/null; echo __ROUTE__; ip route show default 2>/dev/null; echo __NM__; systemctl is-active NetworkManager.service 2>/dev/null; echo __NETWORKD__; systemctl is-active systemd-networkd.service 2>/dev/null; true'
-    $probeLines = @(& wsl.exe -d $DistroName -u root -- sh -c $probeScript 2>$null)
-    $probeExitCode = $LASTEXITCODE
-    if ($probeExitCode -ne 0) {
-        Write-Host "  • $DistroName : unable to run network probe (Exit Code: $probeExitCode)" -ForegroundColor Yellow
+    $result = Invoke-WslCommand -Arguments @('--distribution', $DistroName, '--user', 'root', '--exec', 'sh', '-c', $probeScript) -TimeoutMilliseconds 15000
+    if ($result.ExitCode -ne 0 -or -not $result.IsDecoded) {
+        Write-Host ('  ' + (Get-I18nStr 'Status_NetworkProbeFailed' -Args @($DistroName, $result.ExitCode))) -ForegroundColor Yellow
         return
     }
-
     $values = @{ IPV4 = ''; ROUTE = ''; NM = ''; NETWORKD = '' }
     $currentKey = $null
-    foreach ($line in $probeLines) {
-        $trimmedLine = ([string]$line).Trim()
-        if ($trimmedLine -match '^__(IPV4|ROUTE|NM|NETWORKD)__$') {
-            $currentKey = $Matches[1]
-            continue
-        }
-        if ($currentKey -and -not $values[$currentKey]) {
-            $values[$currentKey] = $trimmedLine
+    foreach ($line in ($result.Text -split '\r?\n')) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^__(IPV4|ROUTE|NM|NETWORKD)__$') { $currentKey = $Matches[1]; continue }
+        if ($currentKey -and -not $values[$currentKey]) { $values[$currentKey] = $trimmed }
+    }
+    if (-not $values.IPV4 -or -not $values.ROUTE) {
+        $key = 'Status_NetworkUnhealthy'; $colour = 'Red'
+    } elseif ($values.NM -eq 'active' -and $values.NETWORKD -eq 'active') {
+        $key = 'Status_NetworkConflict'; $colour = 'Red'
+    } else { $key = 'Status_NetworkHealthy'; $colour = 'Green' }
+    Write-Host ('  ' + (Get-I18nStr $key -Args @($DistroName))) -ForegroundColor $colour
+}
+
+function Invoke-WslStatusAction {
+    param([AllowEmptyString()][string]$Choice)
+    $choiceCode = $Choice.ToUpperInvariant()
+    if ($choiceCode -eq '0' -or -not $choiceCode) { return }
+    if ($choiceCode -notin @('A', 'N', 'K', 'R', 'T', 'S')) {
+        Write-Host (Get-I18nStr 'Err_InvalidChoice') -ForegroundColor Yellow
+        return
+    }
+    $target = ''
+    if ($choiceCode -eq 'S') { $target = 'WSL'; $confirmKey = 'Status_ConfirmShutdown' }
+    else {
+        $target = Select-WslDistro -Title (Get-I18nStr 'Select_Distro_Title')
+        if (-not $target) { return }
+        $confirmKey = switch ($choiceCode) {
+            'A' { 'Status_ConfirmAutoOn' }; 'N' { 'Status_ConfirmAutoOff' }
+            'K' { 'Status_ConfirmKeepOn' }; 'R' { 'Status_ConfirmKeepOff' }
+            'T' { 'Status_ConfirmTerm' }
         }
     }
-
-    if (-not $values['IPV4'] -or -not $values['ROUTE']) {
-        Write-Host "  • $DistroName : unhealthy - eth0 IPv4 address or default route is missing" -ForegroundColor Red
-    } elseif ($values['NM'] -eq 'active' -and $values['NETWORKD'] -eq 'active') {
-        Write-Host "  • $DistroName : conflict - NetworkManager and systemd-networkd both manage networking" -ForegroundColor Red
-    } else {
-        Write-Host "  • $DistroName : healthy - IPv4 and default route are present" -ForegroundColor Green
+    if ((Read-Host (Get-I18nStr $confirmKey -Args @($target))) -ne 'Y') {
+        Write-Host (Get-I18nStr 'Operation_Cancelled') -ForegroundColor Gray
+        return
+    }
+    try {
+        $result = switch ($choiceCode) {
+            'A' { Set-WslDistroAutostart -DistroName $target -Enabled $true }
+            'N' { Set-WslDistroAutostart -DistroName $target -Enabled $false }
+            'K' { Set-WslDistroResidency -DistroName $target -KeepAlive $true }
+            'R' { Set-WslDistroResidency -DistroName $target -KeepAlive $false }
+            'T' {
+                $command = Invoke-WslCommand -Arguments @('--terminate', $target)
+                [pscustomobject]@{ Success = ($command.ExitCode -eq 0); Error = $command.ErrorText }
+            }
+            'S' {
+                $command = Invoke-WslCommand -Arguments @('--shutdown')
+                [pscustomobject]@{ Success = ($command.ExitCode -eq 0); Error = $command.ErrorText }
+            }
+        }
+        if ($result.Success) {
+            Write-Host ('[OK] ' + (Get-I18nStr 'Status_ActionSuccess' -Args @($target))) -ForegroundColor Green
+        } else {
+            Write-Host ('[!] ' + (Get-I18nStr 'Status_ActionFailed' -Args @($target, $result.Error))) -ForegroundColor Red
+        }
+    } catch {
+        Write-Host ('[!] ' + (Get-I18nStr 'Status_ActionFailed' -Args @($target, $_.Exception.Message))) -ForegroundColor Red
     }
 }
 
 function Show-WslDashboard {
     Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host "     $(Get-I18nStr 'Status_Title')      " -ForegroundColor Cyan
-    Write-Host "==========================================" -ForegroundColor Cyan
-
-    # 1. 读取 WSL 核心环境信息
-    Write-Host "`n$(Get-I18nStr 'Status_Step1')" -ForegroundColor Yellow
-    $wslVerRaw = & wsl.exe --version 2>$null
-    if ($LASTEXITCODE -eq 0 -and $wslVerRaw) {
-        $firstLine = ($wslVerRaw | Select-Object -First 1) -replace "`0", ""
-        Write-Host "  • $(if ($global:CurrentLang -eq 'zh-CN') { 'WSL 核心服务' } else { 'WSL Service Status' }): $(if ($global:CurrentLang -eq 'zh-CN') { '正常运行' } else { 'Normal' }) ($firstLine)" -ForegroundColor Green
-    } else {
-        Write-Host "  • $(if ($global:CurrentLang -eq 'zh-CN') { 'WSL 核心服务状态无法验证' } else { 'Unable to verify WSL service status' })" -ForegroundColor Yellow
-    }
-
-    # 2. 读取所有已安装的 WSL 发行版与 Disk VHDX 大小
-    Write-Host "`n$(Get-I18nStr 'Status_Step2')" -ForegroundColor Yellow
-    
-    [string[]]$distros = Get-WslDistros
-
-    if ($distros.Count -eq 0) {
-        Write-Host "  $(Get-I18nStr 'No_Distro_Found')" -ForegroundColor Red
+    Write-Host ('     ' + (Get-I18nStr 'Status_Title')) -ForegroundColor Cyan
+    Write-Host '==========================================' -ForegroundColor Cyan
+    Write-Host ("`n" + (Get-I18nStr 'Status_Step1')) -ForegroundColor Yellow
+    if ($null -eq (Get-Command wsl.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+        Write-Host ('  ' + (Get-I18nStr 'Status_CliMissing')) -ForegroundColor Yellow
         return
     }
-
-    $verboseList = & wsl.exe --list --verbose 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  [!] Unable to query verbose WSL status (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
+    Write-Host ('  ' + (Get-I18nStr 'Status_CliReady')) -ForegroundColor Gray
+    Write-Host ("`n" + (Get-I18nStr 'Status_Step2')) -ForegroundColor Yellow
+    try { $rows = @(Get-WslStatusRows) }
+    catch {
+        Write-Host ('[!] ' + (Get-I18nStr 'Status_QueryFailed' -Args @($_.Exception.Message))) -ForegroundColor Yellow
         return
     }
-    $runningRaw = & wsl.exe --list --running --quiet 2>$null
-    $runningExitCode = $LASTEXITCODE
-    if ($runningExitCode -ne 0) {
-        Write-Host "  [!] Unable to query running WSL distributions (Exit Code: $runningExitCode)." -ForegroundColor Yellow
-        $runningList = @()
+    if ($rows.Count -eq 0) {
+        Write-Host ('  ' + (Get-I18nStr 'No_Distro_Found')) -ForegroundColor Gray
+        return
+    }
+    Show-WslStatusTable -Rows $rows
+    Write-Host ("`n" + (Get-I18nStr 'Status_NetworkTitle')) -ForegroundColor Yellow
+    $running = @($rows | Where-Object { $_.State -eq 'Running' })
+    if ($running.Count -eq 0) {
+        Write-Host ('  ' + (Get-I18nStr 'Status_NetworkSkipped')) -ForegroundColor Gray
     } else {
-        $runningList = @(($runningRaw | ForEach-Object { ($_ -replace "`0", '').Trim() }) | Where-Object { $_ })
+        foreach ($row in $running) { Show-WslNetworkHealth -DistroName $row.Name }
     }
-
-    Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
-    Write-Host "$(Get-I18nStr 'Status_Header')" -ForegroundColor Cyan
-    Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
-
-    for ($i = 0; $i -lt $distros.Count; $i++) {
-        $name = [string]$distros[$i]
-
-        
-        $state = if ($runningList -contains $name) { 'Running' } else { 'Stopped' }
-        $wslVer = "2"
-        if ($verboseList) {
-            foreach ($line in $verboseList) {
-                $cleanLine = ($line -replace "`0", "").Trim()
-                $escapedName = [regex]::Escape($name)
-                if ($cleanLine -match "^\*?\s*$escapedName\s+\S+\s+(?<ver>\d)") {
-                    $wslVer = $Matches['ver']
-                    break
-                }
-            }
-        }
-
-        $vhdxSizeStr = "N/A"
-        $storageInfo = Get-WslDistroStorageInfo -DistroName $name
-        if ($storageInfo) {
-            $sizeGB = [math]::Round($storageInfo.Length / 1GB, 2)
-            $vhdxSizeStr = "$sizeGB GB"
-        }
-
-        $stateColor = if ($state -eq 'Running') { 'Green' } else { 'Gray' }
-        Write-Host ("  [{0}]   |  {1,-12} |  {2,-12} |  WSL {3}     |  {4}" -f ($i + 1), $name, $state, $wslVer, $vhdxSizeStr) -ForegroundColor $stateColor
+    Write-Host ("`n" + (Get-I18nStr 'Status_Step3')) -ForegroundColor Yellow
+    foreach ($key in @('Status_Opt_Autostart', 'Status_Opt_NoAutostart', 'Status_Opt_Resident', 'Status_Opt_Reclaim', 'Status_Opt_Term', 'Status_Opt_Shutdown')) {
+        Write-Host (' ' + (Get-I18nStr $key))
     }
-    Write-Host " --------------------------------------------------------------------------------" -ForegroundColor Gray
-
-    Write-Host "`n[3/4 Running distro network health]" -ForegroundColor Yellow
-    if ($runningList.Count -eq 0) {
-        Write-Host '  No running distributions; network probes were skipped.' -ForegroundColor Gray
-    } else {
-        foreach ($runningDistro in $runningList) {
-            Show-WslNetworkHealth -DistroName $runningDistro
-        }
-    }
-
-    # 4. 运维操作管理
-    Write-Host "`n$(Get-I18nStr 'Status_Step3')" -ForegroundColor Yellow
-    Write-Host " $(Get-I18nStr 'Status_Opt_Term')"
-    Write-Host " $(Get-I18nStr 'Status_Opt_Shutdown')"
-    Write-Host " [0] $(Get-I18nStr 'Cancel_Operation')"
-
-    $opChoice = Read-Host "`n$(Get-I18nStr 'Prompt_Select') [T / S / 0]"
-    if ($opChoice -in 'T', 't') {
-        $target = Select-WslDistro -Title $(Get-I18nStr 'Select_Distro_Title')
-        if ($target) {
-            Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "正在停止发行版: $target ..." } else { "Stopping $target ..." })" -ForegroundColor Yellow
-            & wsl.exe --terminate $target
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { "已成功停止 $target" } else { "Terminated $target successfully." })" -ForegroundColor Green
-            } else {
-                Write-Host "[!] Failed to terminate $target (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
-            }
-        }
-    } elseif ($opChoice -in 'S', 's') {
-        $confirm = Read-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { '确认要执行全局 wsl --shutdown 重启 WSL 吗？所有运行中的 WSL 将被关闭！[Y/N]' } else { 'Confirm execute global wsl --shutdown? All running WSL instances will be stopped! [Y/N]' })"
-        if ($confirm -in 'Y', 'y') {
-            Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { '正在执行全局 shutdown...' } else { 'Shutting down WSL ...' })" -ForegroundColor Red
-            & wsl.exe --shutdown
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[✓] $(if ($global:CurrentLang -eq 'zh-CN') { '全局 WSL 堆栈已关闭重置。' } else { 'Global WSL shutdown complete.' })" -ForegroundColor Green
-            } else {
-                Write-Host "[!] WSL shutdown failed (Exit Code: $LASTEXITCODE)." -ForegroundColor Red
-            }
-        }
-    }
+    Write-Host (' ' + (Get-I18nStr 'Status_AutoHint')) -ForegroundColor Gray
+    Write-Host (' ' + (Get-I18nStr 'Status_KeepHint')) -ForegroundColor Gray
+    Write-Host (' [0] ' + (Get-I18nStr 'Cancel_Operation'))
+    $choice = Read-Host ((Get-I18nStr 'Prompt_Select') + ' [A/N/K/R/T/S/0]')
+    Invoke-WslStatusAction -Choice $choice
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
-    Show-WslDashboard
-}
+if (-not $NoRun -and $MyInvocation.InvocationName -ne '.') { Show-WslDashboard }

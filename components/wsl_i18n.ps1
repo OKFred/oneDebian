@@ -75,7 +75,7 @@ function Load-LocaleJson {
 function Get-I18nStr {
     param(
         [string]$Key,
-        [object[]]$Args = @()
+        [Alias('Args')][object[]]$FormatArgs = @()
     )
 
     $currentDict = Load-LocaleJson -Lang $global:CurrentLang
@@ -93,8 +93,8 @@ function Get-I18nStr {
         }
     }
 
-    if ($Args.Count -gt 0 -and $text) {
-        return [string]::Format($text, $Args)
+    if ($FormatArgs.Count -gt 0 -and $text) {
+        return [string]::Format($text, $FormatArgs)
     }
     return $text
 }

@@ -8,7 +8,7 @@ function Assert-True {
     if (-not $Condition) { throw "Assertion failed: $Message" }
 }
 
-Write-Host '[1/6] Parsing PowerShell files...' -ForegroundColor Cyan
+Write-Host '[1/7] Parsing PowerShell files...' -ForegroundColor Cyan
 foreach ($file in (Get-ChildItem $repoRoot -Recurse -Filter '*.ps1')) {
     $tokens = $null
     $errors = $null
@@ -16,17 +16,17 @@ foreach ($file in (Get-ChildItem $repoRoot -Recurse -Filter '*.ps1')) {
     Assert-True ($errors.Count -eq 0) "$($file.FullName) contains parser errors"
 }
 
-Write-Host '[2/6] Checking Windows PowerShell encoding compatibility...' -ForegroundColor Cyan
+Write-Host '[2/7] Checking Windows PowerShell encoding compatibility...' -ForegroundColor Cyan
 $configPath = Join-Path $repoRoot 'components\wsl_config.ps1'
 $configBytes = [System.IO.File]::ReadAllBytes($configPath)
 $hasUtf8Bom = $configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF
 Assert-True $hasUtf8Bom 'wsl_config.ps1 must use UTF-8 BOM for Windows PowerShell 5.1'
-foreach ($file in @('components\wsl_common.ps1', 'components\wsl_check.ps1', 'tests\wsl_precheck.tests.ps1')) {
+foreach ($file in @('components\wsl_common.ps1', 'components\wsl_check.ps1', 'tests\wsl_precheck.tests.ps1', 'components\wsl_status.ps1', 'components\wsl_status_data.ps1', 'components\wsl_lifecycle.ps1', 'tests\wsl_status.tests.ps1')) {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $repoRoot $file))
     Assert-True ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) "$file must retain UTF-8 BOM for PowerShell 5.1"
 }
 
-Write-Host '[3/6] Testing incremental INI updates...' -ForegroundColor Cyan
+Write-Host '[3/7] Testing incremental INI updates...' -ForegroundColor Cyan
 . (Join-Path $repoRoot 'components\wsl_config.ps1')
 
 $original = @'
@@ -66,7 +66,7 @@ Assert-True ($null -eq $nullPromptResult.Value) 'an unset value must remain null
 
 Show-ConfigDiff -OldContent "[wsl2]`r`nmemory=4GB`r`n" -NewContent "[wsl2]`nmemory=8GB`n" -TargetTitle 'Regression test'
 
-Write-Host '[4/6] Validating locale JSON files...' -ForegroundColor Cyan
+Write-Host '[4/7] Validating locale JSON files...' -ForegroundColor Cyan
 foreach ($locale in (Get-ChildItem $repoRoot -Recurse -Filter '*.json' | Where-Object { $_.DirectoryName -match 'locales$' })) {
     $parsed = Get-Content -LiteralPath $locale.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True ($null -ne $parsed) "$($locale.FullName) is not valid JSON"
@@ -78,7 +78,7 @@ $componentChineseHash = (Get-FileHash (Join-Path $repoRoot 'components\locales\z
 Assert-True ($rootEnglishHash -eq $componentEnglishHash) 'English locale copies are out of sync'
 Assert-True ($rootChineseHash -eq $componentChineseHash) 'Chinese locale copies are out of sync'
 
-Write-Host '[5/6] Checking destructive-operation guardrails...' -ForegroundColor Cyan
+Write-Host '[5/7] Checking destructive-operation guardrails...' -ForegroundColor Cyan
 $purgeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'components\wsl_purge.ps1') -Raw -Encoding UTF8
 $uninstallSource = Get-Content -LiteralPath (Join-Path $repoRoot 'components\wsl_uninstall.ps1') -Raw -Encoding UTF8
 Assert-True (-not $purgeSource.Contains('Remove-Item -LiteralPath $distroDir')) 'purge must not guess and recursively delete distro directories'
@@ -86,7 +86,10 @@ Assert-True (-not $uninstallSource.Contains('Remove-Item -LiteralPath $localDir'
 Assert-True ($purgeSource.Contains("-cne 'PURGE'")) 'purge must require the PURGE confirmation token'
 Assert-True ($uninstallSource.Contains("-cne 'DELETE'")) 'uninstall must require the DELETE confirmation token'
 
-Write-Host '[6/6] Testing WSL version queries and verified repairs...' -ForegroundColor Cyan
+Write-Host '[6/7] Testing WSL version queries and verified repairs...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'wsl_precheck.tests.ps1')
+
+Write-Host '[7/7] Testing compact status and instance lifecycle...' -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot 'wsl_status.tests.ps1')
 
 Write-Host 'All WSL logic tests passed.' -ForegroundColor Green

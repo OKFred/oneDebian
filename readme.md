@@ -35,7 +35,7 @@ cd oneDebian
 - **04. Restore**: Import and restore WSL distro from `.tar` or `.vhdx` backups.
 - **05. Uninstall**: Single or batch unregister WSL distros with `Y` + `DELETE` double confirmation. The tool relies on `wsl --unregister` and never guesses or recursively deletes a distro directory.
 - **06. Config**: Incrementally updates global `%UserProfile%\.wslconfig` and per-distro `/etc/wsl.conf`, preserving comments and unknown keys. Input is validated and changes are shown with an order-sensitive Git diff.
-- **07. Status**: Shows registered VHD paths/sizes and checks running distros for an IPv4 address, default route, and conflicting NetworkManager/systemd-networkd services.
+- **07. Status**: Shows compact instance state, creation estimate, run duration, disk, autostart, and keep-alive fields; manages sign-in startup and idle exit.
 - **08. Purge**: Unregisters selected distros and optionally removes the toolbox image cache and exported backups, protected by `Y` + `PURGE` confirmation. Recovery data is retained if unregistering any distro fails.
 - **L. Language**: Toggle display language seamlessly between `简体中文` and `English`.
 - **0. Exit**: Exit Toolbox (Direct Enter or type 0).
@@ -55,6 +55,16 @@ cd oneDebian
 - Precheck reads `DefaultVersion` and each distribution's `Version` from that user's registry first. When the registry cannot supply a value, it captures WSL command output with encoding detection. Empty, garbled, or unrecognized output is reported as **unable to verify**, rather than assumed to mean WSL1. The toolbox uses WSL commands to make changes and does not edit these registry values directly.
 - Default-version repair runs as the current user and does not require an administrator check. Only Windows optional-feature repairs through DISM require elevation. DISM uses `/norestart`; feature state and restart requirements are queried again afterward. If changes are pending or not yet effective, restart Windows and rerun Precheck before attempting a distribution conversion. A successful command exit code alone does not prove that WSL2 is ready.
 - Error `0x1bc` means the WSL2 kernel needs an update. Precheck displays `wsl --update` and, if the Store update path is unavailable, `wsl --update --web-download`. See Microsoft's [WSL troubleshooting guide](https://learn.microsoft.com/windows/wsl/troubleshooting#error-0x1bc-when-wsl---set-default-version-2).
+
+#### Status and instance actions
+
+Menu **07** shows short columns for name, state, creation estimate, current run duration, disk size, autostart, and keep-alive. The per-instance WSL version column is removed. A leading `~` on a creation date means the storage folder's Windows creation time: copying, moving, restoring, or importing a distribution may change that value, so it is not a guaranteed original installation date. Unavailable fields show `-` or `?`.
+
+Run duration is queried only for a confirmed running instance and is based on that instance's init process start time. It does not use the shared WSL2 virtual machine uptime as the distribution's uptime. Viewing the dashboard does not start stopped or unverified instances.
+
+- **A / N — Autostart / Cancel autostart** manages a task for the current Windows user at sign-in. It does not run distributions as SYSTEM before a user signs in, because WSL distributions are registered per Windows user.
+- **K / R — Keep running / Allow idle exit** controls this toolbox's keep-alive for the selected instance. Keep running starts the instance if needed; allowing idle exit releases only the toolbox's keep-alive and lets WSL apply its default idle rules. It does not force-stop running work or change global memory-reclaim settings.
+- Autostart and keep-alive are independent: autostart with idle exit starts at sign-in then permits normal idle shutdown; autostart with keep-alive remains running. **T** stops one instance immediately; **S** stops all WSL instances. Each state-changing action asks for confirmation.
 
 ---
 
