@@ -28,7 +28,7 @@ cd oneDebian
 
 #### PowerShell 菜单功能清单 (`menu.ps1`)
 
-- **00. Precheck (安装前预检)**：自动化排查 CPU 硬件虚拟化 (VT-x/AMD-V) 开启状态、Windows 虚拟机平台功能、WSL2 命令行连通性与磁盘可用空间，支持一键 DISM 自动修复或跳过。
+- **00. Precheck (安装前预检)**：检查 CPU 虚拟化、Windows 可选功能、新发行版的默认 WSL 版本、各已安装发行版的实际 WSL 版本及磁盘空间。修复后重新查询状态验证；现有 WSL1 发行版须逐个确认后才会转换。
 - **01. Install (安装)**：根据 AMD64/ARM64 架构从 Linux Containers 镜像服务下载 Debian rootfs，强制验证匹配的 SHA-256 校验和后导入为 WSL 2。
 - **02. Update (更新)**：更新指定 WSL Debian 的 `apt` 软件包或更新 Windows `wsl --update` 核心。
 - **03. Backup (备份)**：将指定 WSL 发行版导出为便携的 `.tar` 或 WSL 2 `.vhdx` 快照。
@@ -47,6 +47,14 @@ cd oneDebian
 - `.wslconfig` 对所有 WSL 2 发行版全局生效；`localhostForwarding=false` 会全局关闭 Windows localhost 转发，不是单发行版端口隔离。
 - NAT 仍是默认网络模式。mirrored 会改善 VPN 与 IPv6 兼容性，但局域网入站访问仍可能需要配置 Hyper-V 防火墙。
 - 启用 systemd 时，如果同时检测到 NetworkManager 与 systemd-networkd，向导会提示它们可能覆盖 WSL 注入的 `eth0` 地址和路由。
+
+#### Precheck 版本检测与修复
+
+- `wsl --set-default-version 2` 只设置**后续新安装**使用的 WSL 版本，不会转换已有 Debian。转换现有发行版需使用 `wsl --set-version <发行版名称> 2`；Precheck 会列出 WSL1 实例，并对每个实例单独询问是否转换。转换可能耗时，请提前备份重要文件。详见微软的 [WSL 命令说明](https://learn.microsoft.com/windows/wsl/basic-commands)。
+- 默认版本与发行版注册信息按**当前 Windows 用户**保存。Precheck 会显示有效用户和 `HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss` 路径；如果使用其他管理员账号运行 PowerShell，查询和修改的就是该管理员账号的 WSL 设置与发行版清单。
+- Precheck 优先读取当前用户注册表中的 `DefaultVersion` 和各发行版的 `Version`。注册表不能提供值时，才捕获并识别 WSL 命令输出的编码。空输出、乱码或无法识别的格式会显示为**无法验证**，不会直接判为 WSL1。工具通过 WSL 命令修改设置，不直接改写这些注册表值。
+- 默认版本修复在当前用户上下文执行，不要求管理员身份；只有通过 DISM 修复 Windows 可选功能时才检查管理员权限。DISM 使用 `/norestart`，执行后会重新检查功能状态与重启要求。如果变更待重启或尚未生效，请重启 Windows 后重新运行 Precheck，再进行发行版转换。命令退出码为 0 本身不代表 WSL2 已就绪。
+- 错误 `0x1bc` 表示 WSL2 内核需要更新。Precheck 会提示 `wsl --update`；如果无法通过商店更新，可尝试 `wsl --update --web-download`。详见微软的 [WSL 故障排查说明](https://learn.microsoft.com/windows/wsl/troubleshooting#error-0x1bc-when-wsl---set-default-version-2)。
 
 ---
 

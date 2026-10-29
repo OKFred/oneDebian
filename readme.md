@@ -28,7 +28,7 @@ cd oneDebian
 
 #### PowerShell Menu Features Overview (`menu.ps1`)
 
-- **00. Precheck**: Pre-install environment check & diagnostic. Checks CPU hardware virtualization (VT-x/AMD-V), Windows `VirtualMachinePlatform` features, WSL2 default version, and disk free space with one-click DISM auto-fix or skip.
+- **00. Precheck**: Checks CPU virtualization, Windows optional features, the default version for new WSL distributions, each installed distribution's actual WSL version, and disk space. Repairs are verified by querying the resulting state; existing WSL1 distributions require individual confirmation before conversion.
 - **01. Install**: Downloads an AMD64/ARM64 Debian rootfs from the Linux Containers image service, requires a matching SHA-256 checksum, and imports it as WSL 2.
 - **02. Update**: Update `apt` packages inside WSL or update Windows `wsl --update` core.
 - **03. Backup**: Export a WSL distro as a portable `.tar` archive or a WSL 2 `.vhdx` snapshot.
@@ -47,6 +47,14 @@ cd oneDebian
 - `.wslconfig` is global to all WSL 2 distros. `localhostForwarding=false` disables host localhost forwarding globally; it is not per-distro port isolation.
 - NAT remains the WSL default. Mirrored networking improves VPN and IPv6 compatibility, but inbound LAN access can still require Hyper-V firewall rules.
 - Enabling systemd triggers a warning when both NetworkManager and systemd-networkd are enabled, because they can overwrite WSL's injected `eth0` configuration.
+
+#### Precheck version detection and repair
+
+- `wsl --set-default-version 2` sets the version for **future installations**. It does not convert an existing Debian distribution. To convert one, use `wsl --set-version <DistributionName> 2`; Precheck lists installed WSL1 distributions and asks separately before converting each one. Conversion can take time, so keep a backup of important files. See Microsoft's [WSL command reference](https://learn.microsoft.com/windows/wsl/basic-commands).
+- The default version and distribution registrations belong to the **current Windows user**. Precheck shows the effective user and `HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss` path. Running PowerShell as another administrator account uses that account's WSL settings and distribution list.
+- Precheck reads `DefaultVersion` and each distribution's `Version` from that user's registry first. When the registry cannot supply a value, it captures WSL command output with encoding detection. Empty, garbled, or unrecognized output is reported as **unable to verify**, rather than assumed to mean WSL1. The toolbox uses WSL commands to make changes and does not edit these registry values directly.
+- Default-version repair runs as the current user and does not require an administrator check. Only Windows optional-feature repairs through DISM require elevation. DISM uses `/norestart`; feature state and restart requirements are queried again afterward. If changes are pending or not yet effective, restart Windows and rerun Precheck before attempting a distribution conversion. A successful command exit code alone does not prove that WSL2 is ready.
+- Error `0x1bc` means the WSL2 kernel needs an update. Precheck displays `wsl --update` and, if the Store update path is unavailable, `wsl --update --web-download`. See Microsoft's [WSL troubleshooting guide](https://learn.microsoft.com/windows/wsl/troubleshooting#error-0x1bc-when-wsl---set-default-version-2).
 
 ---
 
