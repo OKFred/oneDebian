@@ -188,6 +188,45 @@ function Invoke-WslStatusAction {
     }
 }
 
+function Show-WslStatusSubmenu {
+    param([ValidateSet('A', 'K', 'T')][string]$Group)
+    $menu = switch ($Group) {
+        'A' { @{ Title = 'Status_SubmenuAutostart'; Items = @('Status_SubAutostartOn', 'Status_SubAutostartOff'); Actions = @('A', 'N'); Hint = 'Status_AutoHint' } }
+        'K' { @{ Title = 'Status_SubmenuRunMode'; Items = @('Status_SubResident', 'Status_SubReclaim'); Actions = @('K', 'R'); Hint = 'Status_KeepHint' } }
+        'T' { @{ Title = 'Status_SubmenuStop'; Items = @('Status_SubStopOne', 'Status_SubStopAll'); Actions = @('T', 'S'); Hint = '' } }
+    }
+    while ($true) {
+        Write-Host ("`n" + (Get-I18nStr $menu.Title)) -ForegroundColor Yellow
+        foreach ($key in $menu.Items) { Write-Host (' ' + (Get-I18nStr $key)) }
+        if ($menu.Hint) { Write-Host (' ' + (Get-I18nStr $menu.Hint)) -ForegroundColor Gray }
+        Write-Host (' ' + (Get-I18nStr 'Status_Back'))
+        $choice = ([string](Read-Host ((Get-I18nStr 'Prompt_Select') + ' [1/2/0]'))).Trim()
+        if (-not $choice -or $choice -eq '0') { return }
+        if ($choice -in @('1', '2')) {
+            Invoke-WslStatusAction -Choice $menu.Actions[([int]$choice - 1)]
+        } else {
+            Write-Host (Get-I18nStr 'Err_InvalidChoice') -ForegroundColor Yellow
+        }
+    }
+}
+
+function Show-WslStatusActions {
+    while ($true) {
+        Write-Host ("`n" + (Get-I18nStr 'Status_Step3')) -ForegroundColor Yellow
+        foreach ($key in @('Status_GroupAutostart', 'Status_GroupRunMode', 'Status_GroupStop')) {
+            Write-Host (' ' + (Get-I18nStr $key))
+        }
+        Write-Host (' ' + (Get-I18nStr 'Status_Back'))
+        $choice = ([string](Read-Host ((Get-I18nStr 'Prompt_Select') + ' [A/K/T/0]'))).Trim().ToUpperInvariant()
+        if (-not $choice -or $choice -eq '0') { return }
+        if ($choice -in @('A', 'K', 'T')) {
+            Show-WslStatusSubmenu -Group $choice
+        } else {
+            Write-Host (Get-I18nStr 'Err_InvalidChoice') -ForegroundColor Yellow
+        }
+    }
+}
+
 function Show-WslDashboard {
     Write-Host "`n==========================================" -ForegroundColor Cyan
     Write-Host ('     ' + (Get-I18nStr 'Status_Title')) -ForegroundColor Cyan
@@ -216,15 +255,7 @@ function Show-WslDashboard {
     } else {
         foreach ($row in $running) { Show-WslNetworkHealth -DistroName $row.Name }
     }
-    Write-Host ("`n" + (Get-I18nStr 'Status_Step3')) -ForegroundColor Yellow
-    foreach ($key in @('Status_Opt_Autostart', 'Status_Opt_NoAutostart', 'Status_Opt_Resident', 'Status_Opt_Reclaim', 'Status_Opt_Term', 'Status_Opt_Shutdown')) {
-        Write-Host (' ' + (Get-I18nStr $key))
-    }
-    Write-Host (' ' + (Get-I18nStr 'Status_AutoHint')) -ForegroundColor Gray
-    Write-Host (' ' + (Get-I18nStr 'Status_KeepHint')) -ForegroundColor Gray
-    Write-Host (' [0] ' + (Get-I18nStr 'Cancel_Operation'))
-    $choice = Read-Host ((Get-I18nStr 'Prompt_Select') + ' [A/N/K/R/T/S/0]')
-    Invoke-WslStatusAction -Choice $choice
+    Show-WslStatusActions
 }
 
 if (-not $NoRun -and $MyInvocation.InvocationName -ne '.') { Show-WslDashboard }

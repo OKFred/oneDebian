@@ -478,5 +478,43 @@ Test-StatusCase 'trusted registry names permit running-state checks when unrelat
     $state=Get-WslDistroRunningState -DistroName 'Debian QA'
     Assert-Status ($state.Known -and $state.Running) 'unknown version prevented a trusted registered-name running check'
 }
+Test-StatusCase 'status parent menu groups related choices and rejects old flat shortcuts' {
+    $answers = New-Object System.Collections.Generic.Queue[string]
+    foreach ($answer in @('N', 'R', 'S', ' a ', 'k', 't', '0')) { $answers.Enqueue($answer) }
+    $groups = New-Object System.Collections.Generic.List[string]
+    function Write-Host { param($Object, $ForegroundColor) }
+    function Read-Host { param($Prompt) $answers.Dequeue() }
+    function Show-WslStatusSubmenu { param($Group) $groups.Add($Group) }
+    function Invoke-WslStatusAction { throw 'parent choices must enter a submenu first' }
+    Show-WslStatusActions
+    Assert-Status (($groups -join ',') -ceq 'A,K,T' -and $answers.Count -eq 0) 'related actions were not grouped at the parent level'
+}
+Test-StatusCase 'submenus route both related choices and return without executing invalid input' {
+    function Write-Host { param($Object, $ForegroundColor) }
+    foreach ($group in @('A', 'K', 'T')) {
+        $answers = New-Object System.Collections.Generic.Queue[string]
+        foreach ($answer in @('bad', '1', '2', '0')) { $answers.Enqueue($answer) }
+        $actions = New-Object System.Collections.Generic.List[string]
+        function Read-Host { param($Prompt) $answers.Dequeue() }
+        function Invoke-WslStatusAction { param($Choice) $actions.Add($Choice) }
+        Show-WslStatusSubmenu -Group $group
+        $expected = switch ($group) { 'A' { 'A,N' }; 'K' { 'K,R' }; 'T' { 'T,S' } }
+        Assert-Status (($actions -join ',') -ceq $expected -and $answers.Count -eq 0) 'submenu dispatched an invalid choice or lost its paired action'
+    }
+}
+Test-StatusCase 'submenu return and cancelled confirmation preserve instance settings' {
+    $answers = New-Object System.Collections.Generic.Queue[string]
+    foreach ($answer in @('A', '0', 'K', '2', 'N', '0', '0')) { $answers.Enqueue($answer) }
+    $tracking = [pscustomobject]@{ Selections = 0 }
+    function Write-Host { param($Object, $ForegroundColor) }
+    function Read-Host { param($Prompt) $answers.Dequeue() }
+    function Select-WslDistro { param($Title) $tracking.Selections++; 'Debian QA' }
+    function Set-WslDistroAutostart { throw 'cancelled action must not change settings' }
+    function Set-WslDistroResidency { throw 'cancelled action must not change settings' }
+    function Invoke-WslCommand { throw 'navigation must not invoke native WSL' }
+    Show-WslStatusActions
+    Assert-Status ($tracking.Selections -eq 1 -and $answers.Count -eq 0) 'return navigation selected an instance or cancelled action did not return to its submenu'
+}
+
 Write-Host "WSL status regressions: $script:statusTestCount tests, $($script:statusTestFailures.Count) failures."
 if ($script:statusTestFailures.Count -gt 0) { throw ($script:statusTestFailures -join "`n") }

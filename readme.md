@@ -62,9 +62,10 @@ Menu **07** shows short columns for name, state, creation estimate, current run 
 
 Run duration is queried only for a confirmed running instance and is based on that instance's init process start time. It does not use the shared WSL2 virtual machine uptime as the distribution's uptime. Viewing the dashboard does not start stopped or unverified instances.
 
-- **A / N — Autostart / Cancel autostart** manages a task for the current Windows user at sign-in. It does not run distributions as SYSTEM before a user signs in, because WSL distributions are registered per Windows user.
-- **K / R — Keep running / Allow idle exit** controls this toolbox's keep-alive for the selected instance. Keep running starts the instance if needed; allowing idle exit releases only the toolbox's keep-alive and lets WSL apply its default idle rules. It does not force-stop running work or change global memory-reclaim settings.
-- Autostart and keep-alive are independent: autostart with idle exit starts at sign-in then permits normal idle shutdown; autostart with keep-alive remains running. **T** stops one instance immediately; **S** stops all WSL instances. Each state-changing action asks for confirmation.
+- **A — Autostart** opens a submenu: **1** enables autostart and **2** disables it. This manages a task for the current Windows user at sign-in. It does not run distributions as SYSTEM before a user signs in, because WSL distributions are registered per Windows user.
+- **K — Run mode** opens a submenu: **1** keeps the selected instance running and **2** allows idle exit. Keep running starts the instance if needed; allowing idle exit releases only the toolbox's keep-alive and lets WSL apply its default idle rules. It does not force-stop running work or change global memory-reclaim settings.
+- **T — Stop actions** opens a submenu: **1** immediately stops one instance and **2** stops all WSL instances. Each state-changing action asks for confirmation. Select **0** to return from a submenu or leave the actions menu.
+- Autostart and keep-alive are independent: autostart with idle exit starts at sign-in then permits normal idle shutdown; autostart with keep-alive remains running.
 
 ---
 
