@@ -18,6 +18,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 . "$PSScriptRoot\wsl_i18n.ps1"
 . "$PSScriptRoot\wsl_common.ps1"
+. "$PSScriptRoot\wsl_network.ps1"
 
 if (-not $DistroName) {
     $DistroName = "Debian-$Version"
@@ -166,6 +167,12 @@ try {
     & wsl.exe --list --verbose
     Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { 'Debian 系统版本信息:' } else { 'Debian Version Details:' })" -ForegroundColor Gray
     & wsl.exe --distribution $DistroName --user root -- cat /etc/debian_version
+
+    try {
+        $null = Invoke-WslNetworkRepairPrompt -Distro $DistroName -OnlyIfSystemd -PrepareSystemd
+    } catch {
+        Write-Host (Get-I18nStr 'Network_CheckUnknown' -Args @($DistroName)) -ForegroundColor Yellow
+    }
 
     Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "启动该发行版命令: wsl -d $DistroName" } else { "To start distro run: wsl -d $DistroName" })" -ForegroundColor Yellow
 } catch {

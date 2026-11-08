@@ -46,7 +46,15 @@ cd oneDebian
 - 资源项默认保持未设置，让 WSL 使用自适应默认值：宿主机内存的 50%、全部逻辑处理器，以及根据内存上限计算的 Swap。
 - `.wslconfig` 对所有 WSL 2 发行版全局生效；`localhostForwarding=false` 会全局关闭 Windows localhost 转发，不是单发行版端口隔离。
 - NAT 仍是默认网络模式。mirrored 会改善 VPN 与 IPv6 兼容性，但局域网入站访问仍可能需要配置 Hyper-V 防火墙。
-- 启用 systemd 时，如果同时检测到 NetworkManager 与 systemd-networkd，向导会提示它们可能覆盖 WSL 注入的 `eth0` 地址和路由。
+- 启用 systemd 时会检查 Linux 网络管理器是否可能接管 `eth0`，不再仅凭两个服务已启用就判定冲突。由 WSL 管理名称解析时，建议保留 `generateHosts=true`、`generateResolvConf=true`；这两项与 systemd 独立，DNS 隧道要求不要关闭 `generateResolvConf`。详见微软的 [WSL 配置](https://learn.microsoft.com/windows/wsl/wsl-config#network-settings)和 [DNS 隧道说明](https://learn.microsoft.com/windows/wsl/troubleshooting#networking-considerations-with-dns-tunneling)。
+
+#### 网络接管检查与修复
+
+**06 配置**在启用 systemd 前检查接口接管风险；**01 安装**也会检查已启用 systemd 的新导入实例。**07 状态**检查运行中实例的 IPv4、默认路由及网络接管情况，发现异常时询问是否修复，不再仅因两个服务同时运行而报冲突。
+
+对于 NAT／mirrored 模式下由 WSL 管理的 `eth0`，经确认后会先备份受影响的文件，再让 NetworkManager 和 networkd 忽略 `eth0`。已有连接配置和其他接口继续保留；修复不手写静态 IP／网关，也不修改 `hosts`／`resolv.conf`。无法确认的模式或其他接口需手动检查。
+
+配置写入成功不代表联网已恢复。请先保存运行中的工作，按提示重启实例，再运行 **07** 验证地址和路由。如果共享 WSL 虚拟机仍保留损坏的网络状态，可能需要完整执行 `wsl --shutdown`；它会停止所有运行中的实例，自动修复不会自行执行此操作。
 
 #### Precheck 版本检测与修复
 

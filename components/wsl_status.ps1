@@ -12,6 +12,7 @@ param(
 . "$PSScriptRoot\wsl_common.ps1"
 . "$PSScriptRoot\wsl_lifecycle.ps1"
 . "$PSScriptRoot\wsl_status_data.ps1"
+. "$PSScriptRoot\wsl_network.ps1"
 
 function Get-WslStatusTextWidth {
     param([AllowEmptyString()][string]$Text)
@@ -119,25 +120,20 @@ function Show-WslNetworkHealth {
     param([string]$DistroName)
     # Recheck before entering a distribution; a stopped/unknown distro is not probed.
     if (-not (Test-WslStatusRunning -DistroName $DistroName)) { return }
-    $probeScript = 'echo __IPV4__; ip -4 -brief address show dev eth0 scope global 2>/dev/null; echo __ROUTE__; ip route show default 2>/dev/null; echo __NM__; systemctl is-active NetworkManager.service 2>/dev/null; echo __NETWORKD__; systemctl is-active systemd-networkd.service 2>/dev/null; true'
-    $result = Invoke-WslCommand -Arguments @('--distribution', $DistroName, '--user', 'root', '--exec', 'sh', '-c', $probeScript) -TimeoutMilliseconds 15000
-    if ($result.ExitCode -ne 0 -or -not $result.IsDecoded) {
-        Write-Host ('  ' + (Get-I18nStr 'Status_NetworkProbeFailed' -Args @($DistroName, $result.ExitCode))) -ForegroundColor Yellow
+    $state = Get-WslNetworkState -Distro $DistroName
+    if (-not $state.Known) {
+        Write-Host ('  ' + (Get-I18nStr 'Network_CheckUnknown' -Args @($DistroName))) -ForegroundColor Yellow
         return
     }
-    $values = @{ IPV4 = ''; ROUTE = ''; NM = ''; NETWORKD = '' }
-    $currentKey = $null
-    foreach ($line in ($result.Text -split '\r?\n')) {
-        $trimmed = $line.Trim()
-        if ($trimmed -match '^__(IPV4|ROUTE|NM|NETWORKD)__$') { $currentKey = $Matches[1]; continue }
-        if ($currentKey -and -not $values[$currentKey]) { $values[$currentKey] = $trimmed }
-    }
-    if (-not $values.IPV4 -or -not $values.ROUTE) {
+    if (-not $state.HasIPv4 -or -not $state.HasDefaultRoute) {
         $key = 'Status_NetworkUnhealthy'; $colour = 'Red'
-    } elseif ($values.NM -eq 'active' -and $values.NETWORKD -eq 'active') {
+    } elseif ($state.Risk) {
         $key = 'Status_NetworkConflict'; $colour = 'Red'
     } else { $key = 'Status_NetworkHealthy'; $colour = 'Green' }
     Write-Host ('  ' + (Get-I18nStr $key -Args @($DistroName))) -ForegroundColor $colour
+    if ($state.Risk -or -not $state.HasIPv4 -or -not $state.HasDefaultRoute) {
+        $null = Invoke-WslNetworkRepairPrompt -Distro $DistroName -State $state
+    }
 }
 
 function Invoke-WslStatusAction {

@@ -46,7 +46,15 @@ cd oneDebian
 - Resource settings are left unset by default so WSL can use its adaptive defaults (50% host memory, all logical processors, and swap based on the memory limit).
 - `.wslconfig` is global to all WSL 2 distros. `localhostForwarding=false` disables host localhost forwarding globally; it is not per-distro port isolation.
 - NAT remains the WSL default. Mirrored networking improves VPN and IPv6 compatibility, but inbound LAN access can still require Hyper-V firewall rules.
-- Enabling systemd triggers a warning when both NetworkManager and systemd-networkd are enabled, because they can overwrite WSL's injected `eth0` configuration.
+- Enabling systemd checks whether Linux network managers may take over `eth0`; two enabled services alone do not establish a conflict. Keep `generateHosts=true` and `generateResolvConf=true` for WSL-managed name resolution. These settings are independent of systemd; DNS tunneling requires `generateResolvConf` not to be disabled. See Microsoft's [WSL configuration](https://learn.microsoft.com/windows/wsl/wsl-config#network-settings) and [DNS tunneling guidance](https://learn.microsoft.com/windows/wsl/troubleshooting#networking-considerations-with-dns-tunneling).
+
+#### Network ownership checks and repair
+
+**06 Config** checks for interface takeover before enabling systemd. **01 Install** also checks newly imported instances that already enable systemd. **07 Status** checks running instances for missing IPv4/default routes or network-manager takeover and offers a confirmed repair. It does not report a conflict merely because both services are running.
+
+For WSL-managed `eth0` in NAT/mirrored mode, a confirmed repair backs up affected files and configures NetworkManager and networkd to ignore `eth0`. Existing connection profiles and other interfaces are retained. The repair does not assign a static IP/gateway or change `hosts`/`resolv.conf`. Unverified modes or other interfaces require manual review.
+
+Writing the configuration does not prove that connectivity has recovered. Save running work, restart the instance as instructed, then rerun **07** to verify addresses and routing. If the shared WSL virtual machine retains broken network state, a full `wsl --shutdown` may be needed; it stops every running WSL instance and is never executed automatically by this repair.
 
 #### Precheck version detection and repair
 

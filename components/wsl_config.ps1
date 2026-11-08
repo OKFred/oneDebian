@@ -8,6 +8,8 @@ param(
 )
 
 . "$PSScriptRoot\wsl_common.ps1"
+. "$PSScriptRoot\wsl_i18n.ps1"
+. "$PSScriptRoot\wsl_network.ps1"
 
 function Get-IniValue {
     param(
@@ -320,15 +322,6 @@ function Test-DistroUserExists {
     return $LASTEXITCODE -eq 0
 }
 
-function Test-DistroNetworkManagerConflict {
-    param([string]$Distro)
-
-    $result = (& wsl.exe -d $Distro -u root -- sh -c "systemctl is-enabled NetworkManager.service 2>/dev/null; systemctl is-enabled systemd-networkd.service 2>/dev/null" 2>$null) -join "`n"
-    if ($LASTEXITCODE -ne 0 -and -not $result) { return $false }
-    $enabledCount = @(($result -split "`r?`n") | Where-Object { $_.Trim() -in 'enabled', 'enabled-runtime' }).Count
-    return $enabledCount -ge 2
-}
-
 function Configure-SingleDistroConf {
     $oldErrorPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -389,20 +382,21 @@ function Configure-SingleDistroConf {
         $newContent = Update-IniFromPromptResult $newContent 'automount' 'options' $mountOptions
 
         $effectiveSystemd = Get-IniValue $newContent 'boot' 'systemd'
-        if ($effectiveSystemd -ieq 'true' -and (Test-DistroNetworkManagerConflict $targetDistro)) {
-            Write-Host "`n[!] 检测到 NetworkManager 与 systemd-networkd 均已启用。" -ForegroundColor Red
-            Write-Host '    启用 systemd 后两者可能覆盖 WSL 注入的 eth0 地址和默认路由。请先让 eth0 仅由 WSL 管理。' -ForegroundColor Yellow
-            $continueChoice = Read-Host '仍要继续保存吗？[Y/N]'
-            if ($continueChoice -notin 'Y', 'y') { return }
-        }
-
         Show-ConfigDiff -OldContent $existingContent -NewContent $newContent -TargetTitle "$targetDistro (/etc/wsl.conf)"
-        if ($existingContent -ceq $newContent) { return }
+        if ($existingContent -ceq $newContent) {
+            if ($effectiveSystemd -ieq 'true') { $null = Invoke-WslNetworkRepairPrompt -Distro $targetDistro -PrepareSystemd }
+            return
+        }
 
         $confirmSave = Read-Host "`n确认将上述增量变更写入 $targetDistro 的 /etc/wsl.conf 吗？[Y/N]"
         if ($confirmSave -notin 'Y', 'y') {
             Write-Host '配置保存已取消。' -ForegroundColor Gray
             return
+        }
+
+        if ($effectiveSystemd -ieq 'true' -and -not (Invoke-WslNetworkRepairPrompt -Distro $targetDistro -PrepareSystemd)) {
+            $continueChoice = Read-Host (Get-I18nStr 'Network_SaveWithoutRepairPrompt' -Args @($targetDistro))
+            if ($continueChoice -ne 'Y') { return }
         }
 
         & wsl.exe -d $targetDistro -u root -- sh -c '[ -f /etc/wsl.conf ] && cp /etc/wsl.conf "/etc/wsl.conf.bak_$(date +%Y%m%d_%H%M%S)"; exit 0' 2>$null
