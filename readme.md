@@ -29,7 +29,7 @@ cd oneDebian
 #### PowerShell Menu Features Overview (`menu.ps1`)
 
 - **00. Precheck**: Checks CPU virtualization, Windows optional features, the default version for new WSL distributions, each installed distribution's actual WSL version, and disk space. Repairs are verified by querying the resulting state; existing WSL1 distributions require individual confirmation before conversion.
-- **01. Install**: Downloads an AMD64/ARM64 Debian rootfs from the Linux Containers image service, requires a matching SHA-256 checksum, and imports it as WSL 2.
+- **01. Install**: Downloads an AMD64/ARM64 Debian rootfs from the Linux Containers image service, requires a matching SHA-256 checksum, and imports it as WSL 2. It then asks whether to apply Bash menu 01 and 02 (mirror selection, package upgrades and basic tools), defaulting to skip.
 - **02. Update**: Update `apt` packages inside WSL or update Windows `wsl --update` core.
 - **03. Backup**: Export a WSL distro as a portable `.tar` archive or a WSL 2 `.vhdx` snapshot.
 - **04. Restore**: Import and restore WSL distro from `.tar` or `.vhdx` backups.
@@ -47,6 +47,26 @@ cd oneDebian
 - `.wslconfig` is global to all WSL 2 distros. `localhostForwarding=false` disables host localhost forwarding globally; it is not per-distro port isolation.
 - NAT remains the WSL default. Mirrored networking improves VPN and IPv6 compatibility, but inbound LAN access can still require Hyper-V firewall rules.
 - Enabling systemd checks whether Linux network managers may take over `eth0`; two enabled services alone do not establish a conflict. Keep `generateHosts=true` and `generateResolvConf=true` for WSL-managed name resolution. These settings are independent of systemd; DNS tunneling requires `generateResolvConf` not to be disabled. See Microsoft's [WSL configuration](https://learn.microsoft.com/windows/wsl/wsl-config#network-settings) and [DNS tunneling guidance](https://learn.microsoft.com/windows/wsl/troubleshooting#networking-considerations-with-dns-tunneling).
+
+#### First-boot wizard
+
+`systemd-firstboot` can initialize locale, keymap, timezone and the root password. The background service in a generic Debian image expects terminal input; it can block systemd startup and cause `Failed to start the systemd user session`.
+
+After import, **01 Install** masks `systemd-firstboot.service` by default, displays the Windows regional locale, display language and timezone, and offers initialization. Enter or No skips it and leaves the background wizard masked. Choosing Yes sets Linux `LANG` from the Windows regional format and `LC_MESSAGES` from the Windows display language, prepares the corresponding UTF-8 locale data, then securely prompts for a root password in the terminal. Passwords are never put on the command line. Keyboard layout and input methods remain controlled by the Windows terminal; no Linux console keymap is written. The timezone uses WSL native Windows timezone synchronization: `[time] useWindowsTimezone` defaults to `true`; explicitly disabled synchronization must be re-enabled in configuration. Unmapped Windows cultures show a manual setup command and leave later installation choices available. Missing locale-generation tools or generation failures after confirmation stop password setup with a clear error, without automatically installing language packages. Without an interactive terminal, the installer displays a manual configuration command with an overwrite notice. **06 Config** applies the same background-service protection before saving systemd settings; unchanged settings require separate confirmation to protect an existing instance. Cancelling the save does not apply protection.
+
+Default protection only masks the first-boot service; systemd, existing users, passwords and configuration are retained. Explicit initialization reconfigures the selected settings. On an already configured system, use `passwd`, `localectl` and `timedatectl` for individual changes. To restore the background wizard, run `systemctl unmask systemd-firstboot.service` inside the instance. See the [Debian firstboot manual](https://manpages.debian.org/trixie/systemd/systemd-firstboot.1.en.html) and [WSL timezone synchronization](https://learn.microsoft.com/windows/wsl/wsl-config#time-settings).
+
+#### Mirror and basic-tool initialization
+
+After firstboot protection and network checks, a new WSL installation asks whether to run the same initialization logic as Bash menu **01 and 02**. Only `Y` or `y` confirms; Enter or any other answer skips it. Without an interactive terminal, it is skipped too. This choice is independent of firstboot locale, timezone and password initialization. When confirmed, it backs up and switches official distribution mirrors, retains security updates and signature checks, updates package indexes and upgrades packages, then installs `nano net-tools htop wget curl git`. Third-party sources are preserved; both traditional `.list` and DEB822 `.sources` files are supported. Failures remain visible and cannot report successful initialization; resolve the cause before retrying.
+
+Existing instances can be initialized explicitly. This command includes package upgrades and stops the batch if an instance fails:
+
+```powershell
+.\initialize-via-wsl.ps1 -DistroName 'debian-wsl-main', 'debian-wsl-01', 'debian-wsl-02', 'debian-wsl-03'
+```
+
+On Debian/Ubuntu, run `sudo bash ./bootstrap.sh` from the repository. Bash menu 01 and 02 remain available separately, and 02 still asks before installing. Initialization runs only when confirmed during installation or when its standalone entry is explicitly invoked, rather than on each boot. It does not depend on cloud-init, systemd or Windows drive mounts. Package upgrades retain existing configuration files; applying `/etc/wsl.conf` changes still requires restarting the instance separately.
 
 #### Network ownership checks and repair
 
@@ -70,10 +90,10 @@ Menu **07** shows short columns for name, state, creation estimate, current run 
 
 Run duration is queried only for a confirmed running instance and is based on that instance's init process start time. It does not use the shared WSL2 virtual machine uptime as the distribution's uptime. Viewing the dashboard does not start stopped or unverified instances.
 
-- **A — Autostart** opens a submenu: **1** enables autostart and **2** disables it. This manages a task for the current Windows user at sign-in. It does not run distributions as SYSTEM before a user signs in, because WSL distributions are registered per Windows user.
-- **K — Run mode** opens a submenu: **1** keeps the selected instance running and **2** allows idle exit. Keep running starts the instance if needed; allowing idle exit releases only the toolbox's keep-alive and lets WSL apply its default idle rules. It does not force-stop running work or change global memory-reclaim settings.
+- **A — Autostart** opens a submenu: **1** enables autostart and **2** disables it. This manages a background task for the current Windows user at sign-in, without leaving a command window open. It does not run distributions as SYSTEM before a user signs in, because WSL distributions are registered per Windows user.
+- **K — Run mode** opens a submenu: **1** keeps the selected instance running in the background and **2** allows idle exit. Keep running starts the instance if needed and continues after the toolbox closes, without an extra PowerShell window; allowing idle exit releases only the toolbox's keep-alive and lets WSL apply its default idle rules. It does not force-stop running work or change global memory-reclaim settings.
 - **T — Stop actions** opens a submenu: **1** immediately stops one instance and **2** stops all WSL instances. Each state-changing action asks for confirmation. Select **0** to return from a submenu or leave the actions menu.
-- Autostart and keep-alive are independent: autostart with idle exit starts at sign-in then permits normal idle shutdown; autostart with keep-alive remains running.
+- Autostart and keep-alive are independent: select both **A → 1** and **K → 1** for sign-in startup and continued background operation. Autostart with idle exit permits normal idle shutdown. After updating the toolbox, save either setting again to migrate an existing managed task to background startup; when keeping residency enabled, an active legacy keep-alive is restarted without force-stopping the distribution or its other workloads.
 
 ---
 
@@ -140,6 +160,7 @@ Run the dependency-free PowerShell 5.1 compatibility and configuration merge tes
 
 ```powershell
 .\tests\wsl_logic.tests.ps1
+.\tests\wsl_bootstrap.tests.ps1
 ```
 
 Check the Cockpit installers without installing packages or changing services:
@@ -147,6 +168,7 @@ Check the Cockpit installers without installing packages or changing services:
 ```bash
 bash -n menu.sh && bash -n components/the_cockpit_extensions_installation.sh
 bash tests/cockpit_extensions.tests.sh
+bash tests/bootstrap.tests.sh
 ```
 
 WSL behavior in this toolbox follows Microsoft's documentation for [advanced configuration](https://learn.microsoft.com/windows/wsl/wsl-config), [networking](https://learn.microsoft.com/windows/wsl/networking), and [command-line operations](https://learn.microsoft.com/windows/wsl/basic-commands).

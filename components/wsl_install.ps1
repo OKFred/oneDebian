@@ -18,7 +18,9 @@ $ProgressPreference = 'SilentlyContinue'
 
 . "$PSScriptRoot\wsl_i18n.ps1"
 . "$PSScriptRoot\wsl_common.ps1"
+. "$PSScriptRoot\wsl_firstboot.ps1"
 . "$PSScriptRoot\wsl_network.ps1"
+. "$PSScriptRoot\wsl_bootstrap.ps1"
 
 if (-not $DistroName) {
     $DistroName = "Debian-$Version"
@@ -126,6 +128,7 @@ try {
         Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '镜像下载地址' } else { 'Image Download URL' }): $rootfsUrl" -ForegroundColor Gray
     }
 
+    Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '导入后可选择执行 Bash 01、02：更换国内源、升级系统包、安装基础工具。' } else { 'After import, you can choose Bash 01 and 02: local mirrors, package upgrades and basic tools.' })" -ForegroundColor Yellow
     $confirm = Read-Host "`n$(Get-I18nStr 'Install_Confirm_Prompt') $DistroName? [Y/N]"
     if ($confirm -ne 'Y' -and $confirm -ne 'y') {
         Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
@@ -164,6 +167,7 @@ try {
     }
 
     Write-Host "`n[✓] $(if ($global:CurrentLang -eq 'zh-CN') { '安装导入成功完成！' } else { 'Import complete successfully!' })" -ForegroundColor Green
+    Invoke-WslFirstBootSetup -Distro $DistroName -PromptInitialize
     & wsl.exe --list --verbose
     Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { 'Debian 系统版本信息:' } else { 'Debian Version Details:' })" -ForegroundColor Gray
     & wsl.exe --distribution $DistroName --user root -- cat /etc/debian_version
@@ -174,7 +178,19 @@ try {
         Write-Host (Get-I18nStr 'Network_CheckUnknown' -Args @($DistroName)) -ForegroundColor Yellow
     }
 
+    $bootstrapPrompt = if ($global:CurrentLang -eq 'zh-CN') {
+        '是否执行 Bash 01、02（更换国内源、升级系统包、安装基础工具）？[y/N]'
+    } else {
+        'Apply Bash 01 and 02 (local mirrors, package upgrades and basic tools)? [y/N]'
+    }
+    if ((Test-WslFirstBootInteractive) -and (Read-Host $bootstrapPrompt) -eq 'Y') {
+        Invoke-WslBootstrap -Distro $DistroName
+    } else {
+        Write-Host $(if ($global:CurrentLang -eq 'zh-CN') { '已跳过 Bash 01、02，可稍后使用 initialize-via-wsl.ps1 执行。' } else { 'Skipped Bash 01 and 02. Run initialize-via-wsl.ps1 later if needed.' }) -ForegroundColor Gray
+    }
+
     Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { "启动该发行版命令: wsl -d $DistroName" } else { "To start distro run: wsl -d $DistroName" })" -ForegroundColor Yellow
 } catch {
     Write-Host "`n[!] $(if ($global:CurrentLang -eq 'zh-CN') { "安装失败: $($_.Exception.Message)" } else { "Installation failed: $($_.Exception.Message)" })" -ForegroundColor Red
+    throw
 }

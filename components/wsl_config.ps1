@@ -9,6 +9,7 @@ param(
 
 . "$PSScriptRoot\wsl_common.ps1"
 . "$PSScriptRoot\wsl_i18n.ps1"
+. "$PSScriptRoot\wsl_firstboot.ps1"
 . "$PSScriptRoot\wsl_network.ps1"
 
 function Get-IniValue {
@@ -382,9 +383,20 @@ function Configure-SingleDistroConf {
         $newContent = Update-IniFromPromptResult $newContent 'automount' 'options' $mountOptions
 
         $effectiveSystemd = Get-IniValue $newContent 'boot' 'systemd'
+        if ($effectiveSystemd -ieq 'true') {
+            Write-Host (Get-I18nStr 'FirstBoot_SavePlan' -Args @($targetDistro)) -ForegroundColor Cyan
+        }
         Show-ConfigDiff -OldContent $existingContent -NewContent $newContent -TargetTitle "$targetDistro (/etc/wsl.conf)"
         if ($existingContent -ceq $newContent) {
-            if ($effectiveSystemd -ieq 'true') { $null = Invoke-WslNetworkRepairPrompt -Distro $targetDistro -PrepareSystemd }
+            if ($effectiveSystemd -ieq 'true') {
+                if ((Read-Host (Get-I18nStr 'FirstBoot_ProtectPrompt' -Args @($targetDistro))) -eq 'Y') {
+                    try { Invoke-WslFirstBootSetup -Distro $targetDistro } catch {
+                        Write-Host $_.Exception.Message -ForegroundColor Red
+                        return
+                    }
+                }
+                $null = Invoke-WslNetworkRepairPrompt -Distro $targetDistro -PrepareSystemd
+            }
             return
         }
 
@@ -394,9 +406,15 @@ function Configure-SingleDistroConf {
             return
         }
 
-        if ($effectiveSystemd -ieq 'true' -and -not (Invoke-WslNetworkRepairPrompt -Distro $targetDistro -PrepareSystemd)) {
-            $continueChoice = Read-Host (Get-I18nStr 'Network_SaveWithoutRepairPrompt' -Args @($targetDistro))
-            if ($continueChoice -ne 'Y') { return }
+        if ($effectiveSystemd -ieq 'true') {
+            try { Invoke-WslFirstBootSetup -Distro $targetDistro } catch {
+                Write-Host $_.Exception.Message -ForegroundColor Red
+                return
+            }
+            if (-not (Invoke-WslNetworkRepairPrompt -Distro $targetDistro -PrepareSystemd)) {
+                $continueChoice = Read-Host (Get-I18nStr 'Network_SaveWithoutRepairPrompt' -Args @($targetDistro))
+                if ($continueChoice -ne 'Y') { return }
+            }
         }
 
         & wsl.exe -d $targetDistro -u root -- sh -c '[ -f /etc/wsl.conf ] && cp /etc/wsl.conf "/etc/wsl.conf.bak_$(date +%Y%m%d_%H%M%S)"; exit 0' 2>$null
