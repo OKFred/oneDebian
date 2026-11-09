@@ -33,10 +33,11 @@ function Get-LocalesDirectory {
 
 function Load-LocaleJson {
     param(
-        [string]$Lang
+        [string]$Lang,
+        [switch]$Reload
     )
 
-    if ($global:LoadedLocales.ContainsKey($Lang)) {
+    if (-not $Reload -and $global:LoadedLocales.ContainsKey($Lang)) {
         $existingDict = $global:LoadedLocales[$Lang]
         if ($existingDict -and $existingDict.Count -gt 0) {
             return $existingDict
@@ -79,6 +80,10 @@ function Get-I18nStr {
     )
 
     $currentDict = Load-LocaleJson -Lang $global:CurrentLang
+    # A running menu can retain an older language pack after the toolbox is updated.
+    if (-not $currentDict.ContainsKey($Key)) {
+        $currentDict = Load-LocaleJson -Lang $global:CurrentLang -Reload
+    }
     $text = $null
 
     if ($currentDict.ContainsKey($Key)) {
@@ -86,6 +91,9 @@ function Get-I18nStr {
     } else {
         # Fallback 机制：若当前语言丢失 key，退回到 zh-CN.json 寻全
         $fallbackDict = Load-LocaleJson -Lang 'zh-CN'
+        if (-not $fallbackDict.ContainsKey($Key)) {
+            $fallbackDict = Load-LocaleJson -Lang 'zh-CN' -Reload
+        }
         if ($fallbackDict.ContainsKey($Key)) {
             $text = $fallbackDict[$Key]
         } else {

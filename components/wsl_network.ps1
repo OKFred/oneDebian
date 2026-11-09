@@ -78,6 +78,11 @@ printf '__WSL_NETWORK_END__\n'
         $risk = $risk -or ($fields.NM_ENABLED -eq 'yes' -and $fields.NM_ACTIVE -eq 'no' -and $fields.NM_PROTECTED -ne 'yes') -or
             ($fields.NETWORKD_ENABLED -eq 'yes' -and $fields.NETWORKD_ACTIVE -eq 'no' -and $fields.NETWORKD_PROTECTED -ne 'yes')
     }
+    $errorText = if ($result.ExitCode -ne 0) {
+        if ($result.ErrorText.Trim()) { $result.ErrorText.Trim() }
+        elseif ($result.Text.Trim()) { $result.Text.Trim() }
+        else { "Network query failed (exit $($result.ExitCode))." }
+    } elseif (-not $valid) { 'Network state could not be verified.' } else { $null }
     return [pscustomobject]@{
         Known = [bool]$valid; SystemdEnabled = ($fields.SYSTEMD -eq 'true')
         HasIPv4 = ($fields.IPV4 -eq 'yes'); HasDefaultRoute = ($fields.ROUTE -eq 'yes'); Interface = $fields.IFACE
@@ -85,7 +90,7 @@ printf '__WSL_NETWORK_END__\n'
         NetworkdManaged = $(if ($fields.NETWORKD -in @('yes', 'no')) { $fields.NETWORKD -eq 'yes' } else { $null })
         NetworkManagerProtected = ($fields.NM_PROTECTED -eq 'yes'); NetworkdProtected = ($fields.NETWORKD_PROTECTED -eq 'yes')
         Risk = [bool]$risk; RepairSupported = ($valid -and $mode -in @('nat', 'mirrored') -and $fields.IFACE -eq 'eth0' -and $fields.ETH0 -eq 'yes')
-        Mode = $mode; Error = $(if ($result.ExitCode -ne 0) { $result.ErrorText } elseif (-not $valid) { 'Network state could not be verified.' } else { $null })
+        Mode = $mode; Error = $errorText
     }
 }
 
@@ -148,6 +153,7 @@ function Invoke-WslNetworkRepairPrompt {
     if ($null -eq $State) { $State = Get-WslNetworkState -Distro $Distro -PrepareSystemd:$PrepareSystemd }
     if (-not $State.Known) {
         Write-Host (Get-I18nStr 'Network_CheckUnknown' -Args @($Distro)) -ForegroundColor Yellow
+        if ($State.Error) { Write-Host ('    ' + $State.Error.Trim()) -ForegroundColor Yellow }
         return $false
     }
     if ($OnlyIfSystemd -and -not $State.SystemdEnabled) { return $true }

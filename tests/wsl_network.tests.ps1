@@ -42,6 +42,25 @@ function New-NetworkState {
     }
 }
 
+Test-NetworkCase 'missing network translations refresh an older cached language pack' {
+    $savedLanguage = $global:CurrentLang
+    $savedLocales = $global:LoadedLocales
+    try {
+        foreach ($language in @('zh-CN', 'en-US')) {
+            $global:CurrentLang = $language
+            $global:LoadedLocales = New-Object 'System.Collections.Generic.Dictionary[string, object]'
+            $cached = New-Object 'System.Collections.Generic.Dictionary[string, string]'
+            $cached['Status_Title'] = 'cached custom title'
+            $global:LoadedLocales[$language] = $cached
+            Assert-Network ((Get-I18nStr 'Status_Title') -eq 'cached custom title') 'a cache hit needlessly replaced the cached language pack'
+            $text = Get-I18nStr 'Network_CheckUnknown' -Args @('Debian QA')
+            Assert-Network ($text.Contains('Debian QA') -and $text -ne 'Network_CheckUnknown') 'a newly added network key stayed hidden behind the old cache'
+        }
+    } finally {
+        $global:CurrentLang = $savedLanguage
+        $global:LoadedLocales = $savedLocales
+    }
+}
 Test-NetworkCase 'enabled managers that both ignore eth0 are not a conflict' {
     function Invoke-WslCommand { param($Arguments, $TimeoutMilliseconds) New-NetworkCommand -Text (New-NetworkProbe) }
     $state = Get-WslNetworkState -Distro 'Debian QA' -PrepareSystemd
@@ -83,6 +102,17 @@ Test-NetworkCase 'failed undecodable or truncated network output remains unverif
         function Invoke-WslCommand { param($Arguments, $TimeoutMilliseconds) $command }
         Assert-Network (-not (Get-WslNetworkState -Distro 'Debian QA').Known) 'unknown probe output became a verified network state'
     }
+}
+Test-NetworkCase 'WSL startup errors on stdout remain visible and cannot authorize repair' {
+    $failure = "Catastrophic failure`nError code: Wsl/Service/E_UNEXPECTED"
+    function Invoke-WslCommand { param($Arguments, $TimeoutMilliseconds) New-NetworkCommand -ExitCode -1 -Text $failure }
+    $state = Get-WslNetworkState -Distro 'Debian QA'
+    Assert-Network (-not $state.Known -and -not $state.RepairSupported -and $state.Error.Contains('Wsl/Service/E_UNEXPECTED')) 'the actual WSL failure was discarded because stderr was empty'
+    $messages = New-Object System.Collections.Generic.List[string]
+    function Write-Host { param($Object, $ForegroundColor) $messages.Add([string]$Object) }
+    function Read-Host { throw 'an unverifiable WSL startup must not prompt for repair' }
+    Assert-Network (-not (Invoke-WslNetworkRepairPrompt -Distro 'Debian QA' -State $state)) 'an unknown state was repaired'
+    Assert-Network (($messages -join "`n").Contains('Wsl/Service/E_UNEXPECTED')) 'the repair prompt hid the WSL error details'
 }
 Test-NetworkCase 'declining a repair does not change a distribution or restart WSL' {
     $tracking = [pscustomobject]@{ Prompts = 0 }
@@ -273,6 +303,7 @@ Test-NetworkCase 'cancelling final systemd save never invokes network repair or 
     }
     function Show-ConfigDiff { param($OldContent, $NewContent, $TargetTitle) }
     function Read-Host { param($Prompt) 'N' }
+    function Invoke-WslFirstBootSetup { throw 'firstboot protection cannot run before save confirmation' }
     function Invoke-WslNetworkRepairPrompt { throw 'repair cannot run before save confirmation' }
     function wsl.exe { $global:LASTEXITCODE = 0; if (($args -join ' ') -match 'if \[ -f /etc/wsl.conf \]; then cat') { "[boot]`nsystemd=false`n" } else { $tracking.Writes++ } }
     Configure-SingleDistroConf
@@ -291,6 +322,7 @@ Test-NetworkCase 'declining protection and unsafe continuation leaves wsl.conf u
     }
     function Show-ConfigDiff { param($OldContent, $NewContent, $TargetTitle) }
     function Read-Host { param($Prompt) $answers.Dequeue() }
+    function Invoke-WslFirstBootSetup { param($Distro) }
     function Invoke-WslNetworkRepairPrompt { param($Distro, [switch]$PrepareSystemd) $tracking.Checks++; $false }
     function wsl.exe { $global:LASTEXITCODE = 0; if (($args -join ' ') -match 'if \[ -f /etc/wsl.conf \]; then cat') { "[boot]`nsystemd=false`n" } else { $tracking.Writes++ } }
     Configure-SingleDistroConf

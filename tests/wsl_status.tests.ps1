@@ -194,6 +194,15 @@ Test-StatusCase 'network probe never enters a stopped or unverified instance' {
     Show-WslNetworkHealth -DistroName Debian
     Assert-Status (($tracking -join ',') -ceq '--list|--running|--quiet') 'a stopped instance was entered for a network probe'
 }
+Test-StatusCase 'unknown network state reports the native WSL error without offering repair' {
+    $messages = New-Object System.Collections.Generic.List[string]
+    function Write-Host { param($Object, $ForegroundColor) $messages.Add([string]$Object) }
+    function Test-WslStatusRunning { param($DistroName) $true }
+    function Get-WslNetworkState { param($Distro) [pscustomobject]@{ Known = $false; Error = 'Wsl/Service/E_UNEXPECTED' } }
+    function Invoke-WslNetworkRepairPrompt { throw 'an unknown guest must not offer network changes' }
+    Show-WslNetworkHealth -DistroName 'Debian QA'
+    Assert-Status (($messages -join "`n").Contains('Wsl/Service/E_UNEXPECTED')) 'unknown state hid the native WSL execution error'
+}
 Test-StatusCase 'dashboard probes only rows confirmed running' {
     $tracking = New-Object System.Collections.Generic.List[string]
     function Write-Host { param($Object,$ForegroundColor) }
@@ -223,15 +232,24 @@ function New-StatusLifecycleContext {
         DistroName='Debian QA'; Sid='S-1-5-21-1000'; Token='fixture-token'; WslExe='C:\Windows\System32\wsl.exe'
         TaskName='oneDebian-WSL-fixture-token'; TaskPath='\'; Description='oneDebian fixture owned task'
         StartArguments='--distribution "Debian QA" --exec /bin/true'; ResidentArguments='--distribution "Debian QA" --exec fixture-keeper'
+        BackgroundExe='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+        BackgroundStartArguments='-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand fixture-start'
+        BackgroundResidentArguments='-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand fixture-keeper'
+        LauncherExe='C:\Users\Fixture\.oneDebian\bin\wsl-background-v1.exe'
+        LauncherStartArguments='C:\Windows\System32\wsl.exe "--distribution fixture-start"'
+        LauncherResidentArguments='C:\Windows\System32\wsl.exe "--distribution fixture-keeper"'
     }
 }
 function New-StatusLifecycleTask {
-    param($Context, [bool]$Autostart = $false, [bool]$KeepAlive = $false, [string]$State='Ready')
+    param($Context, [bool]$Autostart = $false, [bool]$KeepAlive = $false, [string]$State='Ready', [switch]$Legacy, [switch]$PowerShell)
     $triggers = @()
     if ($Autostart) { $triggers = @([pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='MSFT_TaskLogonTrigger'};UserId=$Context.Sid}) }
     [pscustomobject]@{
         TaskName=$Context.TaskName;TaskPath=$Context.TaskPath;Description=$Context.Description
-        Actions=@([pscustomobject]@{Execute=$Context.WslExe;Arguments=$(if($KeepAlive){$Context.ResidentArguments}else{$Context.StartArguments})})
+        Actions=@([pscustomobject]@{
+            Execute=$(if($Legacy){$Context.WslExe}elseif($PowerShell){$Context.BackgroundExe}else{$Context.LauncherExe})
+            Arguments=$(if($Legacy){if($KeepAlive){$Context.ResidentArguments}else{$Context.StartArguments}}elseif($PowerShell){if($KeepAlive){$Context.BackgroundResidentArguments}else{$Context.BackgroundStartArguments}}else{if($KeepAlive){$Context.LauncherResidentArguments}else{$Context.LauncherStartArguments}})
+        })
         Principal=[pscustomobject]@{UserId=$Context.Sid;LogonType='Interactive';RunLevel='Limited'}
         Triggers=$triggers;Settings=[pscustomobject]@{Enabled=$true;ExecutionTimeLimit='PT0S';MultipleInstances='IgnoreNew'};State=$State
     }
@@ -242,6 +260,7 @@ function Initialize-StatusLifecycleFixture {
         Known=$true;Running=$false
     }
     function Get-WslLifecycleContext { param($DistroName) $lifecycleFixture.Context }
+    function Initialize-WslLifecycleLauncher { param($Context) }
     function Get-WslLifecycleTask { param($Context) $lifecycleFixture.Task }
     function Set-WslLifecycleTask {
         param($Context,[bool]$Autostart,[bool]$KeepAlive)
@@ -307,6 +326,25 @@ Test-StatusCase 'residency-only task with no login trigger remains owned without
     Assert-Status (Test-WslLifecycleTaskOwnership -Task $task -Context $context) 'empty trigger collection was rejected'
     $policy=Get-WslLifecycleTaskPolicy -Task $task -Context $context
     Assert-Status ($policy.KeepAlive -and -not $policy.Autostart) 'residency-only became sign-in autostart'
+}
+Test-StatusCase 'legacy tasks remain owned but mixed executable and argument pairs are rejected' {
+    $context=New-StatusLifecycleContext
+    foreach($keep in @($false,$true)) {
+        $legacy=New-StatusLifecycleTask -Context $context -Autostart $true -KeepAlive $keep -Legacy
+        Assert-Status (Test-WslLifecycleTaskOwnership -Task $legacy -Context $context) 'legacy task could no longer be managed'
+        $policy=Get-WslLifecycleTaskPolicy -Task $legacy -Context $context
+        Assert-Status ($policy.Autostart -and $policy.KeepAlive -eq $keep) 'legacy settings were misread'
+        $legacy.Actions[0].Execute=$context.BackgroundExe
+        Assert-Status (-not (Test-WslLifecycleTaskOwnership -Task $legacy -Context $context)) 'direct WSL arguments accepted for PowerShell'
+        $modern=New-StatusLifecycleTask -Context $context -KeepAlive $keep
+        $modern.Actions[0].Execute=$context.WslExe
+        Assert-Status (-not (Test-WslLifecycleTaskOwnership -Task $modern -Context $context)) 'PowerShell arguments accepted for WSL'
+        $powershell=New-StatusLifecycleTask -Context $context -KeepAlive $keep -PowerShell
+        Assert-Status (Test-WslLifecycleTaskOwnership -Task $powershell -Context $context) 'old PowerShell task could no longer be managed'
+        Assert-Status ((Get-WslLifecycleTaskPolicy -Task $powershell -Context $context).KeepAlive -eq $keep) 'PowerShell policy was lost'
+        $powershell.Actions[0].Execute=$context.LauncherExe
+        Assert-Status (-not (Test-WslLifecycleTaskOwnership -Task $powershell -Context $context)) 'PowerShell arguments accepted for native launcher'
+    }
 }
 Test-StatusCase 'same-name foreign task prevents every mutation' {
     $context=New-StatusLifecycleContext
@@ -386,6 +424,7 @@ Test-StatusCase 'keeper release builds an exact owner argv match and never a glo
 Test-StatusCase 'task registration uses current-user interactive sign-in without elevation or a timeout' {
     $context=New-StatusLifecycleContext
     $fixture=[pscustomobject]@{Task=$null;Definition=$null;Registered=0}
+    function Initialize-WslLifecycleLauncher {param($Context)}
     function Get-WslLifecycleTask {param($Context)$fixture.Task}
     function New-ScheduledTaskAction {param($Execute,$Argument)[pscustomobject]@{Execute=$Execute;Arguments=$Argument}}
     function New-ScheduledTaskPrincipal {param($UserId,$LogonType,$RunLevel)[pscustomobject]@{UserId=$UserId;LogonType=$LogonType;RunLevel=$RunLevel}}
@@ -401,11 +440,26 @@ Test-StatusCase 'task registration uses current-user interactive sign-in without
     function Register-ScheduledTask {param($TaskName,$TaskPath,$InputObject,[switch]$Force,$ErrorAction)$fixture.Registered++;$fixture.Task=$InputObject}
     Set-WslLifecycleTask -Context $context -Autostart $true -KeepAlive $true
     Assert-Status ($fixture.Registered -eq 1 -and $fixture.Task.Principal.UserId -ceq $context.Sid -and $fixture.Task.Principal.LogonType -eq 'Interactive' -and $fixture.Task.Principal.RunLevel -eq 'Limited') 'task was assigned another user or elevation'
-    Assert-Status ($fixture.Task.Triggers[0].UserId -ceq $context.Sid -and $fixture.Task.Actions[0].Arguments -ceq $context.ResidentArguments) 'trigger/action mismatch'
+    Assert-Status ($fixture.Task.Triggers[0].UserId -ceq $context.Sid -and $fixture.Task.Actions[0].Execute -ceq $context.LauncherExe -and $fixture.Task.Actions[0].Arguments -ceq $context.LauncherResidentArguments) 'trigger/background action mismatch'
+}
+Test-StatusCase 'legacy ready task is replaced with a hidden one-shot action without losing sign-in' {
+    $context=New-StatusLifecycleContext
+    $fixture=[pscustomobject]@{Task=(New-StatusLifecycleTask -Context $context -Autostart $true -Legacy)}
+    function Initialize-WslLifecycleLauncher {param($Context)}
+    function Get-WslLifecycleTask {param($Context)$fixture.Task}
+    function New-ScheduledTaskAction {param($Execute,$Argument)[pscustomobject]@{Execute=$Execute;Arguments=$Argument}}
+    function New-ScheduledTaskPrincipal {param($UserId,$LogonType,$RunLevel)[pscustomobject]@{UserId=$UserId;LogonType=$LogonType;RunLevel=$RunLevel}}
+    function New-ScheduledTaskSettingsSet {param($ExecutionTimeLimit,$MultipleInstances,[switch]$AllowStartIfOnBatteries,[switch]$DontStopIfGoingOnBatteries,[switch]$StartWhenAvailable)[pscustomobject]@{Enabled=$true;ExecutionTimeLimit='PT0S';MultipleInstances=$MultipleInstances}}
+    function New-ScheduledTaskTrigger {param([switch]$AtLogOn,$User)[pscustomobject]@{CimClass=[pscustomobject]@{CimClassName='MSFT_TaskLogonTrigger'};UserId=$User}}
+    function New-ScheduledTask {param($Action,$Principal,$Settings,$Description,$Trigger=@())[pscustomobject]@{TaskName=$context.TaskName;TaskPath=$context.TaskPath;Description=$Description;Actions=@($Action);Principal=$Principal;Settings=$Settings;Triggers=@($Trigger);State='Ready'}}
+    function Register-ScheduledTask {param($TaskName,$TaskPath,$InputObject,[switch]$Force,$ErrorAction)$fixture.Task=$InputObject}
+    Set-WslLifecycleTask -Context $context -Autostart $true -KeepAlive $false
+    Assert-Status ($fixture.Task.Actions[0].Execute -ceq $context.LauncherExe -and $fixture.Task.Actions[0].Arguments -ceq $context.LauncherStartArguments -and $fixture.Task.Triggers.Count -eq 1) 'legacy action was not migrated'
 }
 Test-StatusCase 'task registration readback must match requested policy' {
     $context=New-StatusLifecycleContext
     $fixture=[pscustomobject]@{Task=$null}
+    function Initialize-WslLifecycleLauncher {param($Context)}
     function Get-WslLifecycleTask {param($Context)$fixture.Task}
     function New-ScheduledTaskAction {param($Execute,$Argument)[pscustomobject]@{Execute=$Execute;Arguments=$Argument}}
     function New-ScheduledTaskPrincipal {param($UserId,$LogonType,$RunLevel)[pscustomobject]@{UserId=$UserId;LogonType=$LogonType;RunLevel=$RunLevel}}
@@ -445,11 +499,112 @@ Test-StatusCase 'keep-running upgrades an already running one-shot startup into 
     $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
     Assert-Status ($result.Success -and $lifecycleFixture.Calls.Contains('Stop') -and $lifecycleFixture.Calls.Contains('Start')) 'running one-shot task was mistaken for a resident keeper'
 }
+Test-StatusCase 'running legacy keeper is released and restarted in the background' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -Autostart $true -KeepAlive $true -State Running -Legacy
+    $lifecycleFixture.Running=$true
+    $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
+    Assert-Status ($result.Success -and $result.State.Autostart -and $result.State.ResidentRunning) 'legacy migration lost policy or residency'
+    Assert-Status (($lifecycleFixture.Calls -join ',') -ceq 'Release,Stop,Policy:True:True,Start') 'visible keeper was not safely replaced'
+    Assert-Status ($lifecycleFixture.Task.Actions[0].Execute -ceq $lifecycleFixture.Context.LauncherExe) 'legacy executable remained'
+}
+Test-StatusCase 'closed PowerShell task releases its orphan keeper before starting a native launcher' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -Autostart $true -KeepAlive $true -State Ready -PowerShell
+    $lifecycleFixture.Running=$true
+    $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
+    Assert-Status ($result.Success -and ($lifecycleFixture.Calls -join ',') -ceq 'Release,Policy:True:True,Start') 'orphan keeper was duplicated or not restarted'
+}
+Test-StatusCase 'autostart save migrates an orphan from a closed PowerShell task' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -Autostart $true -KeepAlive $true -State Ready -PowerShell
+    $lifecycleFixture.Running=$true
+    $result=Set-WslDistroAutostart -DistroName 'Debian QA' -Enabled $false
+    Assert-Status ($result.Success -and ($lifecycleFixture.Calls -join ',') -ceq 'Release,Policy:True:True,Start,Policy:False:True') 'autostart ignored a verified orphan keeper'
+}
+Test-StatusCase 'autostart save refuses an unverified orphan from a closed PowerShell task' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -KeepAlive $true -State Ready -PowerShell
+    $lifecycleFixture.Known=$false
+    $result=Set-WslDistroAutostart -DistroName 'Debian QA' -Enabled $true
+    Assert-Status (-not $result.Success -and $lifecycleFixture.Calls.Count -eq 0) 'unverified orphan was ignored'
+}
+Test-StatusCase 'launcher build failure leaves the old keeper and policy untouched' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -KeepAlive $true -State Running -PowerShell
+    $lifecycleFixture.Running=$true
+    function Initialize-WslLifecycleLauncher {param($Context)throw 'fixture compiler failure'}
+    $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
+    Assert-Status (-not $result.Success -and $lifecycleFixture.Calls.Count -eq 0) 'failed build stopped the existing keeper'
+}
+Test-StatusCase 'autostart change also migrates a running legacy keeper and preserves residency' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -Autostart $true -KeepAlive $true -State Running -Legacy
+    $lifecycleFixture.Running=$true
+    $result=Set-WslDistroAutostart -DistroName 'Debian QA' -Enabled $false
+    Assert-Status ($result.Success -and -not $result.State.Autostart -and $result.State.KeepAlive) 'autostart migration discarded the requested policy'
+    Assert-Status (($lifecycleFixture.Calls -join ',') -ceq 'Release,Stop,Policy:True:True,Start,Policy:False:True') 'autostart left the visible keeper running'
+}
+Test-StatusCase 'legacy migration does not restart when running state or keeper cleanup cannot be verified' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -KeepAlive $true -State Running -Legacy
+    $lifecycleFixture.Known=$false
+    $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
+    Assert-Status (-not $result.Success -and $lifecycleFixture.Calls.Count -eq 0) 'unknown legacy state was changed'
+    $lifecycleFixture.Known=$true;$lifecycleFixture.Running=$true
+    function Stop-WslLifecycleKeeper {param($Context)throw 'fixture release failed'}
+    $result=Set-WslDistroAutostart -DistroName 'Debian QA' -Enabled $true
+    Assert-Status (-not $result.Success -and $lifecycleFixture.Calls.Count -eq 0) 'failed legacy cleanup was followed by a restart'
+}
+Test-StatusCase 'queued legacy keeper on a stopped distro migrates without entering Linux' {
+    . Initialize-StatusLifecycleFixture
+    $lifecycleFixture.Task=New-StatusLifecycleTask -Context $lifecycleFixture.Context -KeepAlive $true -State Queued -Legacy
+    $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
+    Assert-Status ($result.Success -and -not $lifecycleFixture.Calls.Contains('Release') -and $lifecycleFixture.Calls.Contains('Stop') -and $lifecycleFixture.Calls.Contains('Start')) 'queued migration woke Linux for cleanup or skipped restart'
+}
+Test-StatusCase 'background launcher quotes literal paths and arguments and suppresses the WSL console' {
+    $exe="C:\Program Files\用户's\wsl.exe"
+    $arguments='--distribution "中文 Debian''s $name; $(exit 99)" --exec /bin/true'
+    $encoded=Get-WslLifecycleBackgroundArguments -Executable $exe -Arguments $arguments
+    Assert-Status ($encoded.StartsWith('-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ')) 'launcher is interactive or visible'
+    $crlf=[scriptblock]::Create((${function:Get-WslLifecycleBackgroundArguments}.ToString() -replace "`r?`n", "`r`n"))
+    Assert-Status ((& $crlf -Executable $exe -Arguments $arguments) -ceq $encoded) 'checkout line endings changed the task identity'
+    $source=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String(($encoded -split ' ')[-1]))
+    $ast=[System.Management.Automation.Language.Parser]::ParseInput($source,[ref]$null,[ref]$null)
+    foreach($field in @(@('FileName',$exe),@('Arguments',$arguments))) {
+        $assignment=$ast.Find({param($node)$node -is [System.Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ceq ('$start.'+$field[0])},$true)
+        Assert-Status ($assignment.Right.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $assignment.Right.Expression.Value -ceq $field[1]) 'literal native value was interpolated or corrupted'
+    }
+    Assert-Status ($source.Contains('$start.UseShellExecute = $false') -and $source.Contains('$start.CreateNoWindow = $true')) 'WSL console suppression is absent'
+}
+Test-StatusCase 'background launcher waits for its child and propagates exit and launch failures' {
+    $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $child=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Milliseconds 300; exit 37'))
+    $arguments=Get-WslLifecycleBackgroundArguments -Executable $powershell -Arguments "-NoProfile -NonInteractive -EncodedCommand $child"
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    $result=Invoke-WslCommand -FilePath $powershell -Arguments ($arguments -split ' ') -TimeoutMilliseconds 15000
+    Assert-Status ($result.ExitCode -eq 37 -and $watch.ElapsedMilliseconds -ge 300) "launcher detached or lost the child failure (exit $($result.ExitCode), elapsed $($watch.ElapsedMilliseconds)ms): $($result.Text) $($result.ErrorText)"
+    $arguments=Get-WslLifecycleBackgroundArguments -Executable (Join-Path $env:TEMP 'oneDebian-nonexistent-executable.exe') -Arguments ''
+    $result=Invoke-WslCommand -FilePath $powershell -Arguments ($arguments -split ' ') -TimeoutMilliseconds 15000
+    Assert-Status ($result.ExitCode -eq 1) 'launch failure was reported as success'
+}
 Test-StatusCase 'task and distro running without the exact keeper cannot verify residency' {
     . Initialize-StatusLifecycleFixture
     function Get-WslLifecycleKeeperState {param($Context)[pscustomobject]@{Known=$true;Running=$false}}
     $result=Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
     Assert-Status (-not $result.Success) 'a transient running task was treated as a keeper'
+}
+Test-StatusCase 'keeper probe preserves native WSL execution failure details' {
+    $context = New-StatusLifecycleContext
+    function Invoke-WslCommand { param($Arguments, $TimeoutMilliseconds) New-StatusCommand -Text "Catastrophic failure`nError code: Wsl/Service/E_UNEXPECTED" -ExitCode -1 }
+    $state = Get-WslLifecycleKeeperState -Context $context
+    Assert-Status (-not $state.Known -and -not $state.Running -and $state.ExitCode -eq -1 -and $state.Error.Contains('Wsl/Service/E_UNEXPECTED')) 'native WSL failure became absent/successful residency or lost its reason'
+}
+Test-StatusCase 'failed residency verification reports the native keeper probe error' {
+    . Initialize-StatusLifecycleFixture
+    function Get-WslLifecycleKeeperState { param($Context) [pscustomobject]@{ Known = $false; Running = $false; Error = 'WSL keeper probe failed (exit -1): Wsl/Service/E_UNEXPECTED'; ExitCode = -1 } }
+    $result = Set-WslDistroResidency -DistroName 'Debian QA' -KeepAlive $true
+    Assert-Status (-not $result.Success -and $result.Error.Contains('Wsl/Service/E_UNEXPECTED') -and $result.Error.Contains('could not be verified')) 'task Running hid an unverified guest execution failure'
 }
 Test-StatusCase 'residency needs two consecutive positive keeper observations' {
     . Initialize-StatusLifecycleFixture

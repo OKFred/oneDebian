@@ -123,6 +123,7 @@ function Show-WslNetworkHealth {
     $state = Get-WslNetworkState -Distro $DistroName
     if (-not $state.Known) {
         Write-Host ('  ' + (Get-I18nStr 'Network_CheckUnknown' -Args @($DistroName))) -ForegroundColor Yellow
+        if ($state.Error) { Write-Host ('    ' + $state.Error.Trim()) -ForegroundColor Yellow }
         return
     }
     if (-not $state.HasIPv4 -or -not $state.HasDefaultRoute) {

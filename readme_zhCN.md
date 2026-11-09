@@ -29,7 +29,7 @@ cd oneDebian
 #### PowerShell 菜单功能清单 (`menu.ps1`)
 
 - **00. Precheck (安装前预检)**：检查 CPU 虚拟化、Windows 可选功能、新发行版的默认 WSL 版本、各已安装发行版的实际 WSL 版本及磁盘空间。修复后重新查询状态验证；现有 WSL1 发行版须逐个确认后才会转换。
-- **01. Install (安装)**：根据 AMD64/ARM64 架构从 Linux Containers 镜像服务下载 Debian rootfs，强制验证匹配的 SHA-256 校验和后导入为 WSL 2。
+- **01. Install (安装)**：根据 AMD64/ARM64 架构从 Linux Containers 镜像服务下载 Debian rootfs，强制验证匹配的 SHA-256 校验和后导入为 WSL 2，随后询问是否执行 Bash 菜单 01、02 的换源、软件包升级和基础工具安装，默认跳过。
 - **02. Update (更新)**：更新指定 WSL Debian 的 `apt` 软件包或更新 Windows `wsl --update` 核心。
 - **03. Backup (备份)**：将指定 WSL 发行版导出为便携的 `.tar` 或 WSL 2 `.vhdx` 快照。
 - **04. Restore (还原)**：从 `.tar` 或 `.vhdx` 备份镜像还原/导入为新的 WSL 发行版。
@@ -47,6 +47,26 @@ cd oneDebian
 - `.wslconfig` 对所有 WSL 2 发行版全局生效；`localhostForwarding=false` 会全局关闭 Windows localhost 转发，不是单发行版端口隔离。
 - NAT 仍是默认网络模式。mirrored 会改善 VPN 与 IPv6 兼容性，但局域网入站访问仍可能需要配置 Hyper-V 防火墙。
 - 启用 systemd 时会检查 Linux 网络管理器是否可能接管 `eth0`，不再仅凭两个服务已启用就判定冲突。由 WSL 管理名称解析时，建议保留 `generateHosts=true`、`generateResolvConf=true`；这两项与 systemd 独立，DNS 隧道要求不要关闭 `generateResolvConf`。详见微软的 [WSL 配置](https://learn.microsoft.com/windows/wsl/wsl-config#network-settings)和 [DNS 隧道说明](https://learn.microsoft.com/windows/wsl/troubleshooting#networking-considerations-with-dns-tunneling)。
+
+#### 首次启动向导
+
+`systemd-firstboot` 不只设置 root 密码，还可初始化语言、键盘、时区等。通用 Debian 镜像中的后台服务需要终端输入，可能挡住 systemd 启动，继而出现 `Failed to start the systemd user session`。
+
+**01 安装**导入完成后会默认屏蔽 `systemd-firstboot.service`，显示 Windows 的默认区域语言、界面语言和时区，再询问是否立即初始化；回车或选择否会跳过，后台向导仍保持屏蔽。选择是时，用 Windows 当前区域格式设置 Linux 的 `LANG`，用 Windows 当前界面语言设置 `LC_MESSAGES`，准备对应的 UTF-8 locale 数据，再在终端安全询问 root 密码；密码不放入命令行。键盘和输入法继续使用 Windows 终端设置，不写 Linux 控制台键盘映射。时区使用 WSL 原生的 Windows 时区同步，`[time] useWindowsTimezone` 默认为 `true`；若此前显式关闭同步，应在配置中重新开启。无法可靠映射 Windows 语言时会显示手动设置入口，并继续后续安装选择；确认后若缺少语言数据工具或生成失败则明确报错，不自动安装语言包，也不会继续设置密码。没有交互终端时会显示带覆盖说明的手动设置命令。**06 配置**保存 systemd 设置前也会做后台服务防护；配置无变化时，需单独确认才处理现有实例。取消保存不会触发防护。
+
+默认防护仅屏蔽首次启动服务，不禁用 systemd，也不删除已有用户、密码或配置；显式选择初始化才会重新配置所选项目。已配置好的系统可用 `passwd`、`localectl`、`timedatectl` 分别调整。需要恢复后台向导时，可在实例内执行 `systemctl unmask systemd-firstboot.service`。详见 [Debian firstboot 手册](https://manpages.debian.org/trixie/systemd/systemd-firstboot.1.en.html)和 [WSL 时区同步说明](https://learn.microsoft.com/windows/wsl/wsl-config#time-settings)。
+
+#### 换源与基础工具初始化
+
+WSL 新建流程在首次启动防护和网络检查后，询问是否执行与 Bash 菜单 **01、02** 共用的初始化逻辑，只有输入 `Y` 或 `y` 才执行，回车或其他回答默认跳过；没有交互终端时也跳过。此选择与语言、时区和密码的首次启动初始化相互独立。确认后会备份并切换发行版官方软件源、保留安全更新和签名校验、更新索引并升级软件包，再安装 `nano net-tools htop wget curl git`。第三方源保留；传统 `.list` 和 DEB822 `.sources` 均受支持。初始化失败会显示错误，不会报告初始化成功，可修正原因后重试。
+
+已有实例可显式补做，以下命令包含软件包升级，任一实例失败后停止批量执行：
+
+```powershell
+.\initialize-via-wsl.ps1 -DistroName 'debian-wsl-main', 'debian-wsl-01', 'debian-wsl-02', 'debian-wsl-03'
+```
+
+普通 Debian/Ubuntu 可在仓库目录运行 `sudo bash ./bootstrap.sh`。Bash 菜单 01、02 保留单独操作入口；02 仍询问是否安装。初始化只在安装时确认或显式调用独立入口时执行，不会随每次启动重复运行，不依赖 cloud-init、systemd 或 Windows 磁盘挂载。已有配置文件会在包升级时保留；初始化不负责重新启动实例以应用 `/etc/wsl.conf`。
 
 #### 网络接管检查与修复
 
@@ -70,10 +90,10 @@ cd oneDebian
 
 运行时长仅对确认正在运行的实例查询，按该实例的 init 进程启动时间计算，不把 WSL2 共享虚拟机的运行时长当作单个实例的运行时长。查看状态页不会启动已停止或状态未确认的实例。
 
-- **A — 自启设置**：进入子菜单，**1** 开机自启，**2** 取消自启。管理当前 Windows 用户登录时执行的任务。WSL 实例按 Windows 用户注册，因此这里的“开机自启”是用户登录后启动，不以 SYSTEM 身份在登录前启动。
-- **K — 运行方式**：进入子菜单，**1** 运行常驻，**2** 自动回收。运行常驻会按需启动选定实例；自动回收仅取消本工具的常驻，再由 WSL 按默认空闲规则退出，不强制停止正在运行的任务，也不修改全局内存回收设置。
+- **A — 自启设置**：进入子菜单，**1** 开机自启，**2** 取消自启。管理当前 Windows 用户登录时执行的后台任务，不保留命令行窗口。WSL 实例按 Windows 用户注册，因此这里的“开机自启”是用户登录后启动，不以 SYSTEM 身份在登录前启动。
+- **K — 运行方式**：进入子菜单，**1** 运行常驻，**2** 自动回收。运行常驻会按需启动选定实例，并在关闭工具箱后继续后台运行，无需保留额外 PowerShell 窗口；自动回收仅取消本工具的常驻，再由 WSL 按默认空闲规则退出，不强制停止正在运行的任务，也不修改全局内存回收设置。
 - **T — 停止操作**：进入子菜单，**1** 立即停止一个实例，**2** 停止全部 WSL 实例。所有状态变更操作均需确认。选择 **0** 可返回上一级菜单，或退出操作菜单。
-- 自启与常驻分别设置：自启但自动回收时，登录后启动并允许正常空闲退出；自启且常驻时，登录后持续运行。
+- 自启与常驻分别设置：同时选择 **A → 1** 和 **K → 1**，即可登录后启动并持续后台运行；自启但自动回收时，允许正常空闲退出。更新工具箱后，重新保存任一设置即可将已有的本工具任务迁移为后台启动；保留常驻时，正在运行的旧版常驻进程会重新启动，不强制停止实例或其中的其他任务。
 
 ---
 
@@ -140,6 +160,7 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 
 ```powershell
 .\tests\wsl_logic.tests.ps1
+.\tests\wsl_bootstrap.tests.ps1
 ```
 
 无需实际安装软件或修改服务，即可验证 Cockpit 安装逻辑：
@@ -147,6 +168,7 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 ```bash
 bash -n menu.sh && bash -n components/the_cockpit_extensions_installation.sh
 bash tests/cockpit_extensions.tests.sh
+bash tests/bootstrap.tests.sh
 ```
 
 本工具的 WSL 行为以微软官方的[高级配置](https://learn.microsoft.com/windows/wsl/wsl-config)、[网络说明](https://learn.microsoft.com/windows/wsl/networking)和[命令行操作](https://learn.microsoft.com/windows/wsl/basic-commands)文档为准。
