@@ -58,7 +58,7 @@ if [ "$nd_order_ok" = yes ] && printf '[Match]\nName=eth0\n\n[Link]\nUnmanaged=y
 mode=$(wslinfo --networking-mode 2>/dev/null | tr '[:upper:]' '[:lower:]'); printf 'MODE=%s\n' "${mode:-unknown}"
 printf '__WSL_NETWORK_END__\n'
 '@
-    $result = Invoke-WslCommand -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', $script) -TimeoutMilliseconds 30000
+    $result = Invoke-WslShellScript -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', $script) -TimeoutMilliseconds 30000
     $fields = @{}
     $valid = $result.ExitCode -eq 0 -and $result.IsDecoded -and $result.Text.Trim().StartsWith('__WSL_NETWORK_V1__') -and $result.Text.Trim().EndsWith('__WSL_NETWORK_END__')
     foreach ($line in ($result.Text -split '\r?\n')) {
@@ -137,7 +137,7 @@ function Repair-WslEth0Management {
     if (-not $before.Known -or -not $before.RepairSupported) {
         return [pscustomobject]@{ Success = $false; BackupPath = ''; Error = 'The standard WSL eth0 network could not be verified.'; RestartRequired = $false }
     }
-    $result = Invoke-WslCommand -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', (Get-WslEth0RepairScript)) -TimeoutMilliseconds 30000
+    $result = Invoke-WslShellScript -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', (Get-WslEth0RepairScript)) -TimeoutMilliseconds 30000
     $backup = ''
     if ($result.Text -match '(?m)^BACKUP=([^\r\n]*)$') { $backup = $Matches[1] }
     if ($result.ExitCode -ne 0 -or -not $result.IsDecoded -or $result.Text -notmatch '(?m)^__WSL_NETWORK_REPAIRED__$') {

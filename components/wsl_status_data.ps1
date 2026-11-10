@@ -78,7 +78,7 @@ function Get-WslInstanceUptime {
     $names = @($running.Text -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($names -cnotcontains $DistroName) { return $null }
     $script = 'printf "__UPTIME__\n"; cat /proc/uptime; printf "__INIT__\n"; cat /proc/1/stat; printf "__HZ__\n"; getconf CLK_TCK'
-    $command = Invoke-WslCommand -Arguments @('--distribution', $DistroName, '--exec', '/bin/sh', '-c', $script) -TimeoutMilliseconds 15000
+    $command = Invoke-WslShellScript -Arguments @('--distribution', $DistroName, '--exec', '/bin/sh', '-c', $script) -TimeoutMilliseconds 15000
     if ($command.ExitCode -ne 0 -or -not $command.IsDecoded) { return $null }
     return ConvertFrom-WslInstanceUptime -Text $command.Text
 }

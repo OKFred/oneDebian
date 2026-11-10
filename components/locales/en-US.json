@@ -14,6 +14,7 @@
   "Menu_Exit": "0.  Exit      - Exit Toolbox (Direct Enter or 0)",
   "Prompt_Select": "Please enter option number",
   "Err_InvalidChoice": "[!] Unmatched option, please enter a valid choice!",
+  "Err_OperationFailed": "Operation failed",
   "Msg_Pause": "Press any key to return to menu...",
   "Msg_Bye": "Exited Toolbox. Bye!",
   "Cancel_Operation": "Cancel operation",

@@ -437,6 +437,7 @@ function Invoke-WslCommand {
     throw 'Unexpected guest query escaped the installation fixture boundary.'
 }
 '@
+        $common = [IO.File]::ReadAllText((Join-Path $firstBootRepoRoot 'components\wsl_common.ps1'), [Text.Encoding]::UTF8).TrimStart([char]0xFEFF) + "`n" + $common
         [IO.File]::WriteAllText((Join-Path $fixtureRoot 'components\wsl_common.ps1'), $common, (New-Object Text.UTF8Encoding($true)))
         Add-Content -LiteralPath (Join-Path $fixtureRoot 'components\wsl_firstboot.ps1') -Value "`nfunction Test-WslFirstBootInteractive { return `$tracking.Interactive }" -Encoding UTF8
         Add-Content -LiteralPath (Join-Path $fixtureRoot 'components\wsl_firstboot.ps1') -Value "`nfunction Get-WslWindowsDefaults { `$tracking.DefaultsReads++; if (-not `$tracking.DefaultsAvailable) { throw 'fixture unsupported Windows culture' }; New-WindowsDefaultsFixture }" -Encoding UTF8

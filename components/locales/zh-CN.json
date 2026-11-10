@@ -14,6 +14,7 @@
   "Menu_Exit": "0.  Exit      - 退出程序 (直接按回车 或 0)",
   "Prompt_Select": "请输入功能编号",
   "Err_InvalidChoice": "[!] 输入未匹配到有效选项，请正确输入！",
+  "Err_OperationFailed": "操作失败",
   "Msg_Pause": "Press any key to return to menu... (按任意键返回主菜单)",
   "Msg_Bye": "已退出工具箱。 Bye!",
   "Cancel_Operation": "取消操作",

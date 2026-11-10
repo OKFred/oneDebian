@@ -139,6 +139,26 @@ function Invoke-WslCommand {
     }
 }
 
+function Invoke-WslShellScript {
+    param([string[]]$Arguments = @(), [int]$TimeoutMilliseconds = 0)
+    $commandIndex = -1
+    for ($i = 0; $i -lt $Arguments.Count - 1; $i++) {
+        if ($Arguments[$i] -eq '--exec' -and $Arguments[$i + 1] -in @('/bin/sh', '/bin/bash')) {
+            $commandIndex = $i + 2
+            break
+        }
+    }
+    while ($commandIndex -ge 0 -and $commandIndex -lt $Arguments.Count -and $Arguments[$commandIndex] -in @('--noprofile', '--norc')) { $commandIndex++ }
+    $scriptIndex = $commandIndex + 1
+    if ($commandIndex -lt 0 -or $scriptIndex -ge $Arguments.Count -or $Arguments[$commandIndex] -ne '-c' -or $null -eq $Arguments[$scriptIndex]) {
+        throw 'A Linux shell script must follow -c.'
+    }
+    $nativeArguments = [string[]]$Arguments.Clone()
+    # PowerShell here-strings inherit Windows CRLF; Linux shells require LF.
+    $nativeArguments[$scriptIndex] = $nativeArguments[$scriptIndex].Replace("`r`n", "`n")
+    return Invoke-WslCommand -Arguments $nativeArguments -TimeoutMilliseconds $TimeoutMilliseconds
+}
+
 function Get-WslRegistryState {
     $path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
     try {
