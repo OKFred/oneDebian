@@ -8,7 +8,7 @@ function Assert-True {
     if (-not $Condition) { throw "Assertion failed: $Message" }
 }
 
-Write-Host '[1/10] Parsing PowerShell files...' -ForegroundColor Cyan
+Write-Host '[1/12] Parsing PowerShell files...' -ForegroundColor Cyan
 foreach ($file in (Get-ChildItem $repoRoot -Recurse -Filter '*.ps1')) {
     $tokens = $null
     $errors = $null
@@ -16,17 +16,17 @@ foreach ($file in (Get-ChildItem $repoRoot -Recurse -Filter '*.ps1')) {
     Assert-True ($errors.Count -eq 0) "$($file.FullName) contains parser errors"
 }
 
-Write-Host '[2/10] Checking Windows PowerShell encoding compatibility...' -ForegroundColor Cyan
+Write-Host '[2/12] Checking Windows PowerShell encoding compatibility...' -ForegroundColor Cyan
 $configPath = Join-Path $repoRoot 'components\wsl_config.ps1'
 $configBytes = [System.IO.File]::ReadAllBytes($configPath)
 $hasUtf8Bom = $configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF
 Assert-True $hasUtf8Bom 'wsl_config.ps1 must use UTF-8 BOM for Windows PowerShell 5.1'
-foreach ($file in @('components\wsl_common.ps1', 'components\wsl_check.ps1', 'tests\wsl_precheck.tests.ps1', 'components\wsl_status.ps1', 'components\wsl_status_data.ps1', 'components\wsl_lifecycle.ps1', 'tests\wsl_status.tests.ps1', 'tests\wsl_background.tests.ps1', 'components\wsl_network.ps1', 'tests\wsl_network.tests.ps1', 'components\wsl_firstboot.ps1', 'tests\wsl_firstboot.tests.ps1', 'components\wsl_bootstrap.ps1', 'initialize-via-wsl.ps1', 'tests\wsl_bootstrap.tests.ps1')) {
+foreach ($file in @('components\wsl_common.ps1', 'components\wsl_check.ps1', 'tests\wsl_precheck.tests.ps1', 'components\wsl_status.ps1', 'components\wsl_status_data.ps1', 'components\wsl_lifecycle.ps1', 'tests\wsl_status.tests.ps1', 'tests\wsl_background.tests.ps1', 'components\wsl_network.ps1', 'tests\wsl_network.tests.ps1', 'components\wsl_firstboot.ps1', 'tests\wsl_firstboot.tests.ps1', 'components\wsl_bootstrap.ps1', 'initialize-via-wsl.ps1', 'tests\wsl_bootstrap.tests.ps1', 'tests\wsl_shell.tests.ps1', 'tests\wsl_menu.tests.ps1')) {
     $bytes = [IO.File]::ReadAllBytes((Join-Path $repoRoot $file))
     Assert-True ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) "$file must retain UTF-8 BOM for PowerShell 5.1"
 }
 
-Write-Host '[3/10] Testing incremental INI updates...' -ForegroundColor Cyan
+Write-Host '[3/12] Testing incremental INI updates...' -ForegroundColor Cyan
 . (Join-Path $repoRoot 'components\wsl_config.ps1')
 
 $original = @'
@@ -66,7 +66,7 @@ Assert-True ($null -eq $nullPromptResult.Value) 'an unset value must remain null
 
 Show-ConfigDiff -OldContent "[wsl2]`r`nmemory=4GB`r`n" -NewContent "[wsl2]`nmemory=8GB`n" -TargetTitle 'Regression test'
 
-Write-Host '[4/10] Validating locale JSON files...' -ForegroundColor Cyan
+Write-Host '[4/12] Validating locale JSON files...' -ForegroundColor Cyan
 foreach ($locale in (Get-ChildItem $repoRoot -Recurse -Filter '*.json' | Where-Object { $_.DirectoryName -match 'locales$' })) {
     $parsed = Get-Content -LiteralPath $locale.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-True ($null -ne $parsed) "$($locale.FullName) is not valid JSON"
@@ -78,7 +78,7 @@ $componentChineseHash = (Get-FileHash (Join-Path $repoRoot 'components\locales\z
 Assert-True ($rootEnglishHash -eq $componentEnglishHash) 'English locale copies are out of sync'
 Assert-True ($rootChineseHash -eq $componentChineseHash) 'Chinese locale copies are out of sync'
 
-Write-Host '[5/10] Checking destructive-operation guardrails...' -ForegroundColor Cyan
+Write-Host '[5/12] Checking destructive-operation guardrails...' -ForegroundColor Cyan
 $purgeSource = Get-Content -LiteralPath (Join-Path $repoRoot 'components\wsl_purge.ps1') -Raw -Encoding UTF8
 $uninstallSource = Get-Content -LiteralPath (Join-Path $repoRoot 'components\wsl_uninstall.ps1') -Raw -Encoding UTF8
 Assert-True (-not $purgeSource.Contains('Remove-Item -LiteralPath $distroDir')) 'purge must not guess and recursively delete distro directories'
@@ -86,20 +86,26 @@ Assert-True (-not $uninstallSource.Contains('Remove-Item -LiteralPath $localDir'
 Assert-True ($purgeSource.Contains("-cne 'PURGE'")) 'purge must require the PURGE confirmation token'
 Assert-True ($uninstallSource.Contains("-cne 'DELETE'")) 'uninstall must require the DELETE confirmation token'
 
-Write-Host '[6/10] Testing WSL version queries and verified repairs...' -ForegroundColor Cyan
+Write-Host '[6/12] Testing WSL version queries and verified repairs...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'wsl_precheck.tests.ps1')
 
-Write-Host '[7/10] Testing compact status and instance lifecycle...' -ForegroundColor Cyan
+Write-Host '[7/12] Testing compact status and instance lifecycle...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'wsl_status.tests.ps1')
 & (Join-Path $PSScriptRoot 'wsl_background.tests.ps1')
 
-Write-Host '[8/10] Testing WSL network detection and confirmed repairs...' -ForegroundColor Cyan
+Write-Host '[8/12] Testing WSL network detection and confirmed repairs...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'wsl_network.tests.ps1')
 
-Write-Host '[9/10] Testing firstboot protection and initialization choices...' -ForegroundColor Cyan
+Write-Host '[9/12] Testing firstboot protection and initialization choices...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'wsl_firstboot.tests.ps1')
 
-Write-Host '[10/10] Testing shared initialization and batch execution...' -ForegroundColor Cyan
+Write-Host '[10/12] Testing shared initialization and batch execution...' -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot 'wsl_bootstrap.tests.ps1')
+
+Write-Host '[11/12] Testing Linux shell line endings and literal arguments...' -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot 'wsl_shell.tests.ps1')
+
+Write-Host '[12/12] Testing menu operation errors...' -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot 'wsl_menu.tests.ps1')
 
 Write-Host 'All WSL logic tests passed.' -ForegroundColor Green

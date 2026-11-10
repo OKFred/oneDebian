@@ -37,7 +37,7 @@ function Invoke-SubScript {
     try {
         & $ScriptBlock
     } catch {
-        Write-Host "`n[!] $(Get-I18nStr 'Err_InvalidChoice'): $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "`n[!] $(Get-I18nStr 'Err_OperationFailed'): $($_.Exception.Message)" -ForegroundColor Red
     } finally {
         Pause-Menu
     }

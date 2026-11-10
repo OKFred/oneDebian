@@ -38,7 +38,7 @@ printf '__WSL_FIRSTBOOT_V1__\nPRESENT=yes\nCHANGED=%s\n__WSL_FIRSTBOOT_END__\n' 
 
 function Set-WslFirstBootProtection {
     param([Parameter(Mandatory = $true)][string]$Distro)
-    $result = Invoke-WslCommand -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', (Get-WslFirstBootProtectionScript)) -TimeoutMilliseconds 45000
+    $result = Invoke-WslShellScript -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', (Get-WslFirstBootProtectionScript)) -TimeoutMilliseconds 45000
     $valid = $result.ExitCode -eq 0 -and $result.IsDecoded -and $result.Text.Trim() -match '\A__WSL_FIRSTBOOT_V1__\r?\nPRESENT=(?<Present>yes|no)\r?\nCHANGED=(?<Changed>yes|no)\r?\n__WSL_FIRSTBOOT_END__\z'
     $present = $valid -and $Matches.Present -eq 'yes'
     $changed = $valid -and $Matches.Changed -eq 'yes'
@@ -110,7 +110,7 @@ function Initialize-WslLocaleData {
         [Parameter(Mandatory = $true)][ValidatePattern('^[a-z]{2,3}_[A-Z]{2}\.UTF-8$')][string]$Locale,
         [Parameter(Mandatory = $true)][ValidatePattern('^[a-z]{2,3}_[A-Z]{2}\.UTF-8$')][string]$Messages
     )
-    $result = Invoke-WslCommand -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', (Get-WslLocalePreparationScript), '--', $Locale, $Messages)
+    $result = Invoke-WslShellScript -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/sh', '-c', (Get-WslLocalePreparationScript), '--', $Locale, $Messages)
     if ($result.ExitCode -eq 0 -and $result.IsDecoded -and $result.Text.Trim() -ceq '__WSL_LOCALE_READY_V1__') { return }
     $details = if ($result.ErrorText.Trim()) { $result.ErrorText.Trim() } elseif ($result.Text.Trim()) { $result.Text.Trim() } else { "Locale preparation failed (exit $($result.ExitCode))." }
     throw (Get-I18nStr 'FirstBoot_LocaleFailed' -Args @($Distro, $details))

@@ -190,7 +190,7 @@ function Get-WslLifecycleKeeperState {
     param($Context)
     $probe = 'expected=EXPECTED; for path in /proc/[0-9]*/cmdline; do [ -r "$path" ] || continue; actual=$(od -An -v -tx1 "$path" 2>/dev/null | tr -d " \n"); [ "$actual" != "$expected" ] || { printf __ONEDEBIAN_KEEPER_RUNNING__; exit 0; }; done; printf __ONEDEBIAN_KEEPER_ABSENT__'
     $probe = $probe.Replace('EXPECTED', (Get-WslLifecycleKeeperSignature -Context $Context))
-    $command = Invoke-WslCommand -Arguments @('--distribution', $Context.DistroName, '--exec', '/bin/sh', '-c', $probe) -TimeoutMilliseconds 15000
+    $command = Invoke-WslShellScript -Arguments @('--distribution', $Context.DistroName, '--exec', '/bin/sh', '-c', $probe) -TimeoutMilliseconds 15000
     $marker = $command.Text.Trim()
     $known = $command.ExitCode -eq 0 -and $command.IsDecoded -and $marker -in @('__ONEDEBIAN_KEEPER_RUNNING__', '__ONEDEBIAN_KEEPER_ABSENT__')
     $errorText = $null
@@ -207,7 +207,7 @@ function Stop-WslLifecycleKeeper {
     $expected = Get-WslLifecycleKeeperSignature -Context $Context
     $release = 'expected=EXPECTED; failed=0; for path in /proc/[0-9]*/cmdline; do [ -r "$path" ] || continue; actual=$(od -An -v -tx1 "$path" 2>/dev/null | tr -d " \n"); [ "$actual" = "$expected" ] || continue; pid=${path%/cmdline}; pid=${pid#/proc/}; kill -TERM "$pid" 2>/dev/null || { failed=1; continue; }; count=0; while [ -r "$path" ]; do actual=$(od -An -v -tx1 "$path" 2>/dev/null | tr -d " \n"); [ "$actual" = "$expected" ] || break; count=$((count+1)); [ "$count" -lt 30 ] || { failed=1; break; }; sleep 0.1; done; done; exit "$failed"'
     $release = $release.Replace('EXPECTED', $expected)
-    $command = Invoke-WslCommand -Arguments @('--distribution', $Context.DistroName, '--exec', '/bin/sh', '-c', $release) -TimeoutMilliseconds 15000
+    $command = Invoke-WslShellScript -Arguments @('--distribution', $Context.DistroName, '--exec', '/bin/sh', '-c', $release) -TimeoutMilliseconds 15000
     if ($command.ExitCode -ne 0) { throw 'The managed Linux keep-alive process release could not be verified.' }
 }
 

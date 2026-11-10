@@ -16,7 +16,7 @@ function Invoke-WslBootstrap {
         "[$Distro] Applying Bash 01 and 02: local mirrors, package upgrades and basic tools..."
     }) -ForegroundColor Cyan
 
-    $result = Invoke-WslCommand -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/bash', '--noprofile', '--norc', '-c', (Get-WslBootstrapScript))
+    $result = Invoke-WslShellScript -Arguments @('--distribution', $Distro, '--user', 'root', '--exec', '/bin/bash', '--noprofile', '--norc', '-c', (Get-WslBootstrapScript))
     if ($result.Text) { Write-Host $result.Text.TrimEnd() }
     if ($result.ErrorText) { Write-Host $result.ErrorText.TrimEnd() }
     if ($result.ExitCode -ne 0 -or -not $result.IsDecoded -or $result.Text.TrimEnd() -notmatch '(?:\A|\r?\n)ONEDEBIAN_BOOTSTRAP_OK\z') {

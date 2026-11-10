@@ -56,6 +56,20 @@ cd oneDebian
 
 默认防护仅屏蔽首次启动服务，不禁用 systemd，也不删除已有用户、密码或配置；显式选择初始化才会重新配置所选项目。已配置好的系统可用 `passwd`、`localectl`、`timedatectl` 分别调整。需要恢复后台向导时，可在实例内执行 `systemctl unmask systemd-firstboot.service`。详见 [Debian firstboot 手册](https://manpages.debian.org/trixie/systemd/systemd-firstboot.1.en.html)和 [WSL 时区同步说明](https://learn.microsoft.com/windows/wsl/wsl-config#time-settings)。
 
+#### 导入后出现 `set: Illegal option -`
+
+这通常是 Windows 将 PowerShell 文件检出为 CRLF 后，多行 shell 脚本携带回车符进入 Linux。工具会在调用 Linux shell 前统一转换脚本换行，命令参数中的原始数据保持不变。
+
+如果错误发生在“安装导入成功完成”之后，实例已经导入，无需注销或重新导入。更新仓库并重新打开 PowerShell，在仓库目录继续初始化已有实例：
+
+```powershell
+git pull --ff-only
+. .\components\wsl_i18n.ps1
+. .\components\wsl_common.ps1
+. .\components\wsl_firstboot.ps1
+Invoke-WslFirstBootSetup -Distro 'debian-wsl-main' -PromptInitialize
+```
+
 #### 换源与基础工具初始化
 
 WSL 新建流程在首次启动防护和网络检查后，询问是否执行与 Bash 菜单 **01、02** 共用的初始化逻辑，只有输入 `Y` 或 `y` 才执行，回车或其他回答默认跳过；没有交互终端时也跳过。此选择与语言、时区和密码的首次启动初始化相互独立。确认后会备份并切换发行版官方软件源、保留安全更新和签名校验、更新索引并升级软件包，再安装 `nano net-tools htop wget curl git`。第三方源保留；传统 `.list` 和 DEB822 `.sources` 均受支持。初始化失败会显示错误，不会报告初始化成功，可修正原因后重试。

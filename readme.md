@@ -56,6 +56,20 @@ After import, **01 Install** masks `systemd-firstboot.service` by default, displ
 
 Default protection only masks the first-boot service; systemd, existing users, passwords and configuration are retained. Explicit initialization reconfigures the selected settings. On an already configured system, use `passwd`, `localectl` and `timedatectl` for individual changes. To restore the background wizard, run `systemctl unmask systemd-firstboot.service` inside the instance. See the [Debian firstboot manual](https://manpages.debian.org/trixie/systemd/systemd-firstboot.1.en.html) and [WSL timezone synchronization](https://learn.microsoft.com/windows/wsl/wsl-config#time-settings).
 
+#### `set: Illegal option -` after import
+
+Windows CRLF checkouts can put carriage returns in PowerShell-generated multiline shell scripts. The tool normalizes script line endings before invoking the Linux shell and preserves literal command arguments.
+
+If the error follows "Import complete successfully", the instance is already imported. Update the repository, open a fresh PowerShell session, and resume initialization from the repository directory without unregistering or reimporting the instance:
+
+```powershell
+git pull --ff-only
+. .\components\wsl_i18n.ps1
+. .\components\wsl_common.ps1
+. .\components\wsl_firstboot.ps1
+Invoke-WslFirstBootSetup -Distro 'debian-wsl-main' -PromptInitialize
+```
+
 #### Mirror and basic-tool initialization
 
 After firstboot protection and network checks, a new WSL installation asks whether to run the same initialization logic as Bash menu **01 and 02**. Only `Y` or `y` confirms; Enter or any other answer skips it. Without an interactive terminal, it is skipped too. This choice is independent of firstboot locale, timezone and password initialization. When confirmed, it backs up and switches official distribution mirrors, retains security updates and signature checks, updates package indexes and upgrades packages, then installs `nano net-tools htop wget curl git`. Third-party sources are preserved; both traditional `.list` and DEB822 `.sources` files are supported. Failures remain visible and cannot report successful initialization; resolve the cause before retrying.
