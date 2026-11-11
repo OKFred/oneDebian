@@ -37,6 +37,7 @@ cd oneDebian
 - **06. Config**: Incrementally updates global `%UserProfile%\.wslconfig` and per-distro `/etc/wsl.conf`, preserving comments and unknown keys. Input is validated and changes are shown with an order-sensitive Git diff.
 - **07. Status**: Shows compact instance state, creation estimate, run duration, disk, autostart, and keep-alive fields; manages sign-in startup and idle exit.
 - **08. Purge**: Unregisters selected distros and optionally removes the toolbox image cache and exported backups, protected by `Y` + `PURGE` confirmation. Recovery data is retained if unregistering any distro fails.
+- **09. Agent workstation**: Create an independent Debian 13 `ai-dev` WSL2, or explicitly install in a selected instance. Includes fnm/Node 26, Codex CLI, private Chromium desktop, MCP, noVNC and manual takeover. See the [workstation guide](docs/agent-workstation.md). Native Debian uses Bash menu **14**.
 - **L. Language**: Toggle display language seamlessly between `简体中文` and `English`.
 - **0. Exit**: Exit Toolbox (Direct Enter or type 0).
 

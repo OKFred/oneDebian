@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Agent 浏览器控制
+Exec=/usr/bin/python3 /opt/onedebian-agent/controls.py
+Icon=preferences-desktop-remote-desktop
+Terminal=false
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true

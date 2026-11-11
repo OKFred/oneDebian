@@ -9,6 +9,7 @@
   "Menu_Config": "06. Config    - WSL Config Helper (.wslconfig & wsl.conf)",
   "Menu_Status": "07. Status    - WSL Diagnostics & Instance Status",
   "Menu_Purge": "08. Purge      - Full WSL Environment Purge & Reset",
+  "Menu_Agent": "09. Agent      - Create and manage a dedicated Agent browser workstation",
   "Menu_Lang": "L.  Language  - Switch Display Language",
   "Menu_About": "99. About     - About Toolbox",
   "Menu_Exit": "0.  Exit      - Exit Toolbox (Direct Enter or 0)",

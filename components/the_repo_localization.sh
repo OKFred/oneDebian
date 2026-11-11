@@ -14,8 +14,8 @@ the_apt_source_state() {
       gsub(/[ \t]+/," ",releases); gsub(/[ \t]+/," ",kinds)
       if (tolower(active)=="no" || (" " kinds " ") !~ / deb /) return
       if (os=="Debian") {
-        base_uri=(uri ~ /^https?:\/\/(deb\.debian\.org|ftp\.debian\.org|ftp\.[a-z]+\.debian\.org|mirrors\.ustc\.edu\.cn)\/debian\/?$/)
-        security_uri=(uri ~ /^https?:\/\/(deb\.debian\.org|mirrors\.ustc\.edu\.cn)\/debian-security\/?$/ || uri ~ /^https?:\/\/security\.debian\.org(\/debian-security)?\/?$/)
+        base_uri=(uri ~ /^https?:\/\/(deb\.debian\.org|ftp\.debian\.org|ftp\.[a-z]+\.debian\.org|mirrors\.ustc\.edu\.cn|mirrors\.tuna\.tsinghua\.edu\.cn)\/debian\/?$/)
+        security_uri=(uri ~ /^https?:\/\/(deb\.debian\.org|mirrors\.ustc\.edu\.cn|mirrors\.tuna\.tsinghua\.edu\.cn)\/debian-security\/?$/ || uri ~ /^https?:\/\/security\.debian\.org(\/debian-security)?\/?$/)
       } else {
         base_uri=(uri ~ /^https?:\/\/((([a-z]+\.)?archive|security)\.ubuntu\.com\/ubuntu|ports\.ubuntu\.com\/ubuntu-ports|mirrors\.tuna\.tsinghua\.edu\.cn\/ubuntu(-ports)?)\/?$/)
         security_uri=base_uri
@@ -54,7 +54,13 @@ the_apt_source_state() {
 }
 
 the_localize_apt_sources() {
-  local os=$1 suite=$2 apt_dir=${3:-/etc/apt} file temporary base security security_file uri arch keyring
+  local os=$1 suite=$2 apt_dir=${3:-/etc/apt} mirror=${4:-ustc} file temporary base security security_file uri arch keyring debian_mirror
+  case "$mirror" in
+    ustc) debian_mirror=https://mirrors.ustc.edu.cn ;;
+    tuna) debian_mirror=https://mirrors.tuna.tsinghua.edu.cn ;;
+    official) debian_mirror=https://deb.debian.org ;;
+    *) printf 'Unknown APT mirror: %s\n' "$mirror" >&2; return 1 ;;
+  esac
   local -a files=()
   for file in "$apt_dir/sources.list" "$apt_dir/sources.list.d/"*.list "$apt_dir/sources.list.d/"*.sources; do
     if [ -L "$file" ]; then printf 'Source symlink requires manual review: %s\n' "$file" >&2; return 1; fi
@@ -76,6 +82,7 @@ the_localize_apt_sources() {
         -e 's#https?://security\.debian\.org(/debian-security)?/?([[:space:]]|$)#https://mirrors.ustc.edu.cn/debian-security\2#g' \
         -e 's#https?://(deb\.debian\.org|ftp\.debian\.org|ftp\.[a-z]+\.debian\.org)/debian(-security)?/?([[:space:]]|$)#https://mirrors.ustc.edu.cn/debian\2\3#g' \
         -e 's#http://mirrors\.ustc\.edu\.cn/debian(-security)?/?([[:space:]]|$)#https://mirrors.ustc.edu.cn/debian\1\2#g' \
+        -e "s#https?://(mirrors\\.ustc\\.edu\\.cn|mirrors\\.tuna\\.tsinghua\\.edu\\.cn)/debian(-security)?/?([[:space:]]|\$)#$debian_mirror/debian\\2\\3#g" \
         "$file" >"$temporary"
     else
       sed -E \
@@ -100,7 +107,7 @@ the_localize_apt_sources() {
     rm -f -- "$temporary" || return 1
   done
   if [ "$security" != 1 ]; then
-    uri=https://mirrors.ustc.edu.cn/debian-security
+    uri=$debian_mirror/debian-security
     keyring=/usr/share/keyrings/debian-archive-keyring.gpg
     if [ "$os" = Ubuntu ]; then
       keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
