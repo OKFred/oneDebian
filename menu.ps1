@@ -113,6 +113,7 @@ function Main {
         Write-Host " $(Get-I18nStr 'Menu_Config')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Status')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Purge')" -ForegroundColor Yellow
+        Write-Host " $(Get-I18nStr 'Menu_Agent')" -ForegroundColor Yellow
         Write-Host " ------------------------------------------------"
         Write-Host " $(Get-I18nStr 'Menu_Lang')" -ForegroundColor Cyan
         Write-Host " $(Get-I18nStr 'Menu_About')"
@@ -131,6 +132,7 @@ function Main {
             { $_ -in '06', '6' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_config.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '07', '7' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_status.ps1" -DefaultWslRoot $DefaultWslRoot } }
             { $_ -in '08', '8' }  { Invoke-SubScript { & "$PSScriptRoot\components\wsl_purge.ps1" -DefaultWslRoot $DefaultWslRoot } }
+            { $_ -in '09', '9' }  { Invoke-SubScript { & "$PSScriptRoot\agent-via-wsl.ps1" -WslRoot $DefaultWslRoot } }
             { $_ -in 'L', 'l' }   { Toggle-Language }
             { $_ -in '99' }       { Show-About; Pause-Menu }
             { [string]::IsNullOrWhiteSpace($_) -or $_ -in '0', 'exit' } { Write-Host "`n$(Get-I18nStr 'Msg_Bye')" -ForegroundColor Gray; exit }

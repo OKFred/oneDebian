@@ -20,6 +20,7 @@ source ./components/the_disk_format_and_mount.sh
 source ./components/the_desktop_environment_installation.sh
 source ./components/the_latest_image_updater.sh
 source ./components/the_unused_image_removal.sh
+source ./components/the_agent_environment.sh
 
 menu_title() {
   date
@@ -51,6 +52,7 @@ main() {
     echo "11. the unused image removal--清理未使用的linux版本镜像"
     echo "12. Cockpit file browser--一键安装Cockpit文件浏览器"
     echo "13. Cockpit SMB sharing--一键安装Cockpit SMB文件共享"
+    echo "14. Agent environment--安装 Agent 浏览器工作环境"
     echo "99. about--关于"
     echo "00. exit--退出"
     echo
@@ -70,6 +72,7 @@ main() {
     11) the_unused_image_removal ;;
     12) the_cockpit_file_browser_installation ;;
     13) the_cockpit_smb_installation ;;
+    14) the_agent_environment ;;
     99) nano "$MENU_DIR/readme.md" ;;
     00 | 0 | "") exit 1 ;;
     u) echo "???" ;;

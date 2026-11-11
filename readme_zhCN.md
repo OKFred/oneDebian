@@ -1,5 +1,7 @@
 # oneDebian
 
+**Agent 工作机**：Windows 菜单 **09** 可新建独立 `ai-dev` 或明确选择已有 WSL2 安装；原生 Debian 13 使用 Bash 菜单 **14**。包含 Node 26、Codex CLI、独立浏览器桌面、MCP、noVNC 与接管按钮。详见[安装、查看和恢复说明](docs/agent-workstation.md)。
+
 > 🇨🇳 用于 Ubuntu/Debian 服务器初始化 & Windows WSL 自动化运维工具箱
 
 **作者：** Fred  

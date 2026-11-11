@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=接管浏览器
+Comment=暂停 MCP，保留浏览器和页面
+Exec=/usr/bin/python3 /opt/onedebian-agent/runtime.py takeover
+Icon=input-mouse
+Terminal=false

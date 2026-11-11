@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=交还 Codex
+Comment=恢复 MCP；让 Codex 重新读取页面后继续
+Exec=/usr/bin/python3 /opt/onedebian-agent/runtime.py resume
+Icon=media-playback-start
+Terminal=false

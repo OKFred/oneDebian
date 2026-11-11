@@ -9,6 +9,7 @@
   "Menu_Config": "06. Config    - WSL 配置向导 (.wslconfig & wsl.conf)",
   "Menu_Status": "07. Status    - WSL 运维诊断与实例管理",
   "Menu_Purge": "08. Purge      - WSL 环境全量彻底清理 (Full Purge)",
+  "Menu_Agent": "09. Agent      - 创建与管理独立 Agent 浏览器工作机",
   "Menu_Lang": "L.  Language  - 切换界面语言 (Language)",
   "Menu_About": "99. About     - 关于工具箱",
   "Menu_Exit": "0.  Exit      - 退出程序 (直接按回车 或 0)",

@@ -192,6 +192,51 @@ direct_entry_from_other_directory() {
   grep -Fx 'Root required.' "$CASE_ROOT/direct.output"
 }
 
+agent_mirror_selection() {
+  cat >"$CASE_ROOT/sources.list.d/debian.sources" <<'EOF'
+Types: deb
+URIs: https://deb.debian.org/debian
+Suites: trixie trixie-updates
+Components: main contrib
+Signed-By: /fixture/key.gpg
+
+Types: deb
+URIs: https://deb.debian.org/debian-security
+Suites: trixie-security
+Components: main
+Signed-By: /fixture/key.gpg
+
+Types: deb
+URIs: https://vendor.invalid/debian
+Suites: vendor
+Components: main
+Signed-By: /fixture/vendor.gpg
+EOF
+  cp "$CASE_ROOT/sources.list.d/debian.sources" "$CASE_ROOT/original"
+  the_localize_apt_sources Debian trixie "$CASE_ROOT" tuna || return 1
+  grep -Fx 'URIs: https://mirrors.tuna.tsinghua.edu.cn/debian' "$CASE_ROOT/sources.list.d/debian.sources" &&
+    grep -Fx 'URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security' "$CASE_ROOT/sources.list.d/debian.sources" &&
+    grep -Fx 'Signed-By: /fixture/key.gpg' "$CASE_ROOT/sources.list.d/debian.sources" &&
+    grep -Fx 'URIs: https://vendor.invalid/debian' "$CASE_ROOT/sources.list.d/debian.sources" || return 1
+  the_localize_apt_sources Debian trixie "$CASE_ROOT" official &&
+    cmp "$CASE_ROOT/original" "$CASE_ROOT/sources.list.d/debian.sources" &&
+    cmp "$CASE_ROOT/original" "$CASE_ROOT/sources.list.d/debian.sources.onedebian.bak" &&
+    [ ! -e "$CASE_ROOT/sources.list.d/onedebian-security.list" ]
+}
+
+agent_mirror_missing_security() {
+  printf 'deb https://deb.debian.org/debian trixie main\n' >"$CASE_ROOT/sources.list"
+  the_localize_apt_sources Debian trixie "$CASE_ROOT" tuna &&
+    grep -Fx 'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] https://mirrors.tuna.tsinghua.edu.cn/debian-security trixie-security main' "$CASE_ROOT/sources.list.d/onedebian-security.list"
+}
+
+invalid_mirror_no_writes() {
+  printf 'deb https://deb.debian.org/debian trixie main\n' >"$CASE_ROOT/sources.list"
+  cp "$CASE_ROOT/sources.list" "$CASE_ROOT/original"
+  if the_localize_apt_sources Debian trixie "$CASE_ROOT" invalid; then return 1; fi
+  cmp "$CASE_ROOT/original" "$CASE_ROOT/sources.list" && [ ! -e "$CASE_ROOT/sources.list.onedebian.bak" ]
+}
+
 run_test 'legacy sources preserve options, security, third parties and original backup' legacy_sources
 run_test 'deb822 preserves stanzas and signing keys without adding duplicate sources' deb822_sources
 run_test 'missing security is added exactly once' missing_security
@@ -209,5 +254,8 @@ run_test 'unconfigured package prevents successful completion' verification_fail
 run_test 'dpkg audit findings prevent successful completion' audit_failure_propagates
 run_test 'interactive menu decline performs no installation' interactive_decline
 run_test 'direct entry resolves components from any directory and enforces root' direct_entry_from_other_directory
+run_test 'Agent TUNA and official selection preserve signing, third parties and original backup' agent_mirror_selection
+run_test 'Agent security pocket uses the selected TUNA mirror' agent_mirror_missing_security
+run_test 'invalid mirror is rejected without modifying sources' invalid_mirror_no_writes
 printf 'Bootstrap regressions: %s tests, %s failures.\n' "$TEST_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

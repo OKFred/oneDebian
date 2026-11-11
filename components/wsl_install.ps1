@@ -10,7 +10,11 @@ param(
 
     [string]$DistroName = '',
 
-    [string]$WslRoot = 'D:\wsl'
+    [string]$WslRoot = 'D:\wsl',
+
+    [switch]$AgentImportOnly,
+
+    [switch]$Confirmed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -128,8 +132,10 @@ try {
         Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '镜像下载地址' } else { 'Image Download URL' }): $rootfsUrl" -ForegroundColor Gray
     }
 
-    Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '导入后可选择执行 Bash 01、02：更换国内源、升级系统包、安装基础工具。' } else { 'After import, you can choose Bash 01 and 02: local mirrors, package upgrades and basic tools.' })" -ForegroundColor Yellow
-    $confirm = Read-Host "`n$(Get-I18nStr 'Install_Confirm_Prompt') $DistroName? [Y/N]"
+    if (-not $AgentImportOnly) {
+        Write-Host "    $(if ($global:CurrentLang -eq 'zh-CN') { '导入后可选择执行 Bash 01、02：更换国内源、升级系统包、安装基础工具。' } else { 'After import, you can choose Bash 01 and 02: local mirrors, package upgrades and basic tools.' })" -ForegroundColor Yellow
+    }
+    $confirm = if ($AgentImportOnly -and $Confirmed) { 'Y' } else { Read-Host "`n$(Get-I18nStr 'Install_Confirm_Prompt') $DistroName? [Y/N]" }
     if ($confirm -ne 'Y' -and $confirm -ne 'y') {
         Write-Host "$(Get-I18nStr 'Operation_Cancelled')" -ForegroundColor Gray
         return
@@ -167,6 +173,10 @@ try {
     }
 
     Write-Host "`n[✓] $(if ($global:CurrentLang -eq 'zh-CN') { '安装导入成功完成！' } else { 'Import complete successfully!' })" -ForegroundColor Green
+    if ($AgentImportOnly) {
+        Invoke-WslFirstBootSetup -Distro $DistroName
+        return
+    }
     Invoke-WslFirstBootSetup -Distro $DistroName -PromptInitialize
     & wsl.exe --list --verbose
     Write-Host "`n$(if ($global:CurrentLang -eq 'zh-CN') { 'Debian 系统版本信息:' } else { 'Debian Version Details:' })" -ForegroundColor Gray
