@@ -174,10 +174,71 @@ Test-Agent 'status stops a lost job and accepts actual ready states' {
     function Get-WslAgentStatus { [pscustomobject]@{ state = 'PACKAGES'; phase = 'apt'; job_active = $false } }
     function Start-Sleep { throw 'unexpected wait' }
     $failed = $false
-    try { Wait-WslAgentInstall -Distro ai-dev } catch { $failed = $_.Exception.Message.Contains('not running') }
+    try { Wait-WslAgentInstall -Distro ai-dev } catch { $failed = $_.Exception.Message -match 'not running' }
     Assert-Agent $failed 'lost install job waited forever or was duplicated'
     function Get-WslAgentStatus { [pscustomobject]@{ state = 'READY_SOFTWARE'; phase = 'done'; job_active = $false } }
     Assert-Agent ((Wait-WslAgentInstall -Distro ai-dev).state -eq 'READY_SOFTWARE') 'software fallback was not accepted'
+}
+Test-Agent 'progress names explain every installation stage and terminal state' {
+    foreach ($case in @(
+        @('PRECHECK', '1/5', '准备安装'),
+        @('PACKAGES', '2/5', '安装系统依赖'),
+        @('RUNTIME', '3/5', '安装开发工具'),
+        @('SERVICES', '4/5', '工作环境'),
+        @('VERIFY', '5/5', '检查'),
+        @('READY_SOFTWARE', '', '软件渲染'),
+        @('READY_GPU', '', '硬件加速'),
+        @('ERROR', '', '安装失败'),
+        @('INTERRUPTED', '', '安装已中断'),
+        @('NOT_INSTALLED', '', '尚未安装'),
+        @('UNINSTALLED', '', '已卸载')
+    )) {
+        $text = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = $case[0]; phase = $case[0] })
+        Assert-Agent ($text.Contains($case[1]) -and $text.Contains($case[2])) "unexplained progress state: $($case[0])"
+        Assert-Agent ($text -notmatch 'PACKAGES\s+PACKAGES|RUNTIME\s+RUNTIME') 'duplicate internal phase codes remain'
+    }
+    $text = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'RUNTIME'; phase = 'RUNTIME' })
+    foreach ($tool in @('fnm', 'Node', 'Codex', 'MCP')) { Assert-Agent ($text -match [regex]::Escape($tool)) "runtime task missing: $tool" }
+    $interrupted = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'INTERRUPTED'; phase = 'RUNTIME' })
+    Assert-Agent ($interrupted.Contains('安装已中断') -and $interrupted.Contains('安装开发工具')) 'interruption lost its retained original stage'
+    $failed = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'ERROR'; phase = 'RUNTIME' })
+    Assert-Agent ($failed.Contains('安装失败') -and -not $failed.Contains('安装开发工具')) 'error invented a previous stage that the installer does not retain'
+    $unknown = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'FUTURE_STAGE'; phase = 'FUTURE_STAGE' })
+    Assert-Agent ($unknown.Contains('未知') -and $unknown.Contains('FUTURE_STAGE')) 'unknown progress was hidden or presented as ready'
+}
+Test-Agent 'polling prints elapsed wait and readable transitions without real sleeps' {
+    $capture = [pscustomobject]@{ Index = 0; Sleeps = 0; Lines = (New-Object 'System.Collections.Generic.List[string]') }
+    $stages = @('PRECHECK', 'PACKAGES', 'RUNTIME', 'SERVICES', 'VERIFY', 'READY_SOFTWARE')
+    function Get-WslAgentStatus {
+        param($Distro)
+        Assert-Agent ($Distro -ceq 'fixture-main') 'progress queried another distro'
+        $current = $stages[$capture.Index]; $capture.Index++
+        [pscustomobject]@{ state = $current; phase = $current; job_active = $true }
+    }
+    function Write-Host { param($Object, $ForegroundColor) $capture.Lines.Add([string]$Object) }
+    function Start-Sleep { param($Seconds) Assert-Agent ($Seconds -eq 10) 'poll interval changed'; $capture.Sleeps++ }
+    $result = Wait-WslAgentInstall -Distro fixture-main
+    Assert-Agent ($result.state -eq 'READY_SOFTWARE' -and $capture.Index -eq 6 -and $capture.Sleeps -eq 5) 'progress changed installation control flow'
+    Assert-Agent ($capture.Lines.Count -eq 6) 'polling omitted or duplicated a progress update'
+    foreach ($line in $capture.Lines) {
+        Assert-Agent ($line -match '\[\d{2}:\d{2}:\d{2}\]' -and $line.Contains('fixture-main')) 'elapsed wait or selected distro is unclear'
+        Assert-Agent ($line -notmatch 'PACKAGES\s+PACKAGES|RUNTIME\s+RUNTIME') 'polling still prints duplicate phase codes'
+    }
+    Assert-Agent ($capture.Lines[1].Contains('安装系统依赖') -and $capture.Lines[2].Contains('安装开发工具')) 'reported phase transitions remain untranslated'
+}
+Test-Agent 'translated failures preserve diagnostics and unknown states cannot finish installation' {
+    function Write-Host { param($Object, $ForegroundColor) }
+    function Start-Sleep { throw 'unexpected sleep after a stopped job' }
+    foreach ($code in @('ERROR', 'INTERRUPTED', 'FUTURE_STAGE')) {
+        function Get-WslAgentStatus { [pscustomobject]@{ state = $code; phase = 'RUNTIME'; job_active = $false; error = 'fixture download failed'; log = '/var/lib/onedebian-agent/install.log' } }
+        $failure = ''
+        try { Wait-WslAgentInstall -Distro fixture-main } catch { $failure = $_.Exception.Message }
+        Assert-Agent ($failure -and $failure -notmatch 'unexpected sleep') 'stopped or unknown state was treated as completed'
+        if ($code -ne 'FUTURE_STAGE') {
+            Assert-Agent ($failure.Contains('fixture download failed') -and $failure.Contains('/var/lib/onedebian-agent/install.log') -and $failure.Contains('Resume')) 'failure translation lost the original diagnostic, log path or recovery action'
+            Assert-Agent ($failure -match '继续安装|恢复') 'recovery guidance remains English only'
+        }
+    }
 }
 Test-Agent 'malformed status is unknown rather than ready' {
     function Invoke-WslAgentCommand { New-AgentResult 'not-json' }

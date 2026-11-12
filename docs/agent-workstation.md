@@ -131,6 +131,15 @@ ssh -N -L 127.0.0.1:16080:127.0.0.1:16080 -L 127.0.0.1:18931:127.0.0.1:18931 <�
 
 安装任务由 `onedebian-agent-install.service` 执行，退出终端不会取消。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。重新运行不会启动第二个并发任务；中断后使用 Resume，保留已下载文件。
 
+Windows 安装等待界面每 10 秒显示进度，中文说明后用一个简短英文标签概括：
+
+```text
+[00:05:46] debian-wsl-main：[2/5] 安装系统依赖：桌面、浏览器、中文支持 / Packages
+[00:05:56] debian-wsl-main：[3/5] 安装开发工具：fnm、Node.js、Codex CLI、浏览器 MCP / Runtime
+```
+
+时间是本次等待已用时，继续安装时重新计时，不是剩余时间；`2/5`、`3/5` 是阶段序号，不是下载百分比。后续阶段为配置和启动工作环境（Services）、运行检查（Verification），最后显示软件渲染或硬件加速就绪。失败时仍保留错误原文和日志路径；JSON／状态文件中的阶段码不变。
+
 ```bash
 sudo tail -n 40 /var/lib/onedebian-agent/install.log
 sudo bash /opt/onedebian-agent/agent.sh resume --wait
