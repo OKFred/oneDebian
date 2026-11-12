@@ -15,4 +15,6 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\components\wsl_agent.ps1"
 . "$PSScriptRoot\components\wsl_agent_relay.ps1"
 . "$PSScriptRoot\components\wsl_agent_ssh.ps1"
+# Legacy command-line alias; first install and retries always stage the current payload.
+if ($Action -eq 'Resume') { $PSBoundParameters['Action'] = 'Install' }
 Invoke-WslAgent @PSBoundParameters

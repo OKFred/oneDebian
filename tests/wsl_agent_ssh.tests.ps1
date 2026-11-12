@@ -21,7 +21,7 @@ function Use-SshFixture { param([scriptblock]$Body)
     $before=$env:USERPROFILE
     try {
         $env:USERPROFILE=$fixture
-        $capture=[pscustomobject]@{Calls=(New-Object 'System.Collections.Generic.List[object]');Backend=0;Public='ssh-ed25519 AAAAFixturePublic';Host='ssh-ed25519 AAAAFixtureHost';AliasConflict=$false;FailLogin=$false;PartialKey=$false}
+        $capture=[pscustomobject]@{Calls=(New-Object 'System.Collections.Generic.List[object]');Backend=0;StatusCalls=0;Port=2222;Public='ssh-ed25519 AAAAFixturePublic';Host='ssh-ed25519 AAAAFixtureHost';AliasConflict=$false;FailLogin=$false;PartialKey=$false}
         function Set-WslAgentSshPrivateAcl {param($Path,$Sid,[switch]$Directory)}
         function Get-Command {param($Name,$CommandType,$ErrorAction) [pscustomobject]@{Source='C:\Windows\System32\wsl.exe'}}
         function Invoke-WslCommand {
@@ -50,10 +50,15 @@ function Use-SshFixture { param([scriptblock]$Body)
         function Invoke-WslAgentCommand {
             param($Distro,$Entry,$Command,$Options,$Timeout,[switch]$AllowFailure)
             Assert-Ssh ($Distro -ceq 'ai-dev' -and $Entry -ceq '/fixture/agent.sh') 'target or staged entry was changed'
+            if ($Command -eq 'status') {
+                Assert-Ssh (($Options -join '|') -ceq '--json' -and $Timeout -eq 30000) 'SSH port discovery was not read-only'
+                $capture.StatusCalls++
+                return New-SshResult (@{state='READY_SOFTWARE';ssh=@{port=$capture.Port}} | ConvertTo-Json -Compress)
+            }
             Assert-Ssh ($Command -ceq 'ssh' -and $Timeout -eq 0 -and $AllowFailure) 'wrong backend protocol'
-            Assert-Ssh (($Options -join '|') -ceq ('--yes|--ssh-public-key|'+$capture.Public+'|--ssh-port|2222|--json')) 'private data or wrong public key was sent'
+            Assert-Ssh (($Options -join '|') -ceq ('--yes|--ssh-public-key|'+$capture.Public+'|--ssh-port|'+$capture.Port+'|--json')) 'private data or wrong public key was sent'
             $capture.Backend++
-            return New-SshResult (@{state='SSH_READY';port=2222;host_public_key=$capture.Host} | ConvertTo-Json -Compress)
+            return New-SshResult (@{state='SSH_READY';port=$capture.Port;host_public_key=$capture.Host} | ConvertTo-Json -Compress)
         }
         & $Body $fixture $capture
     } finally {
@@ -259,6 +264,37 @@ Test-Ssh 'normal installation completion configures SSH after viewer readiness' 
     function Initialize-WslAgentSsh {param($Distro,$Entry,$SshPort) $events.Add("ssh:${Distro}:${SshPort}:${Entry}")}
     Complete-WslAgentAccess -Distro ai-dev -SshPort 2223
     Assert-Ssh (($events -join ',') -ceq 'viewer:ai-dev,bundle:ai-dev,ssh:ai-dev:2223:/fixture/agent.sh') 'installation did not configure the selected SSH target after readiness'
+}
+Test-Ssh 'the public SSH action forwards only an explicitly selected port' {
+    $calls=New-Object 'System.Collections.Generic.List[object]'
+    function Get-WslDistros { @('ai-dev') }
+    function Send-WslAgentBundle { param($Distro) '/fixture/agent.sh' }
+    function Initialize-WslAgentSsh {
+        param($Distro,$Entry,$SshPort)
+        $calls.Add([pscustomobject]@{Explicit=$PSBoundParameters.ContainsKey('SshPort');Port=$SshPort})
+    }
+    Invoke-WslAgent -Action Ssh -DistroName ai-dev -Yes
+    Invoke-WslAgent -Action Ssh -DistroName ai-dev -Yes -SshPort 2223
+    Assert-Ssh ($calls.Count -eq 2 -and -not $calls[0].Explicit -and $calls[1].Explicit -and $calls[1].Port -eq 2223) 'the SSH action reset an existing port to its default'
+}
+Test-Ssh 'reinstallation keeps the registered non-default SSH port and key' {
+    Use-SshFixture {
+        param($fixture,$capture)
+        $capture.Port=2223
+        $first=Initialize-WslAgentSsh -Distro ai-dev -Entry /fixture/agent.sh -SshPort 2223
+        $second=Initialize-WslAgentSsh -Distro ai-dev -Entry /fixture/agent.sh
+        Assert-Ssh ($first.port -eq 2223 -and $second.port -eq 2223) 'reinstallation reset the registered port'
+        Assert-Ssh ($capture.StatusCalls -eq 0) 'known registration needed guest port discovery'
+        Assert-Ssh (@($capture.Calls | Where-Object {$_.File -eq 'ssh-keygen.exe' -and $_.Args -contains '-t'}).Count -eq 1) 'reinstallation generated a new key'
+    }
+}
+Test-Ssh 'first Windows registration keeps an existing guest SSH port' {
+    Use-SshFixture {
+        param($fixture,$capture)
+        $capture.Port=2224
+        $result=Initialize-WslAgentSsh -Distro ai-dev -Entry /fixture/agent.sh
+        Assert-Ssh ($result.port -eq 2224 -and $capture.StatusCalls -eq 1) 'guest SSH port was replaced by the default'
+    }
 }
 Write-Host "WSL Agent SSH regressions: $script:sshCount tests, $($script:sshFailures.Count) failures."
 if($script:sshFailures.Count){throw ($script:sshFailures -join "`n")}

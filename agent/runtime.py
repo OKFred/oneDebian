@@ -40,7 +40,7 @@ def gpu_backend(config):
 def graphics_environment(config):
     backend = gpu_backend(config)
     if backend == 'd3d12':
-        return dict(GALLIUM_DRIVER='d3d12', MESA_D3D12_DEFAULT_ADAPTER_NAME='Intel')
+        return dict(GALLIUM_DRIVER='d3d12')
     if backend == 'software':
         return dict(LIBGL_ALWAYS_SOFTWARE='true', GALLIUM_DRIVER='llvmpipe')
     return {}

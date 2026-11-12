@@ -2,6 +2,8 @@
 
 独立于 PVE，支持 WSL2 和已有的原生 Debian 13（amd64/arm64）。默认使用普通用户 `agent`，项目放在 `/home/agent/workspaces`。建议 4 核、8 GB 内存和 32 GB 可用磁盘；WSL 使用共享资源池，工具不修改全局 `.wslconfig`。
 
+安装入口同时负责首装、中断重试和已有环境检查补齐。一次执行会准备开发工具、桌面、浏览器和连接入口；第二次执行会使用仓库最新组件，缺什么补什么，保留已有端口、项目、浏览器资料和正常服务。Windows 已有实例始终选择 **09 → 2 安装／检查补齐**，原生 Debian 始终选择 **14 → 1**。旧菜单编号和 `Resume` 命令仅作隐藏兼容别名，不再有独立恢复流程；其他编号不变。显卡重测、SSH、凭据库和桌面更新等专项入口保留，供高级运维使用。
+
 ## Windows / WSL2
 
 从仓库目录运行 `./menu.ps1`，选择 **09 Agent 工作机 → 1 新建独立 ai-dev**。可修改实例名、安装根目录、镜像源和端口；默认 `D:\wsl\ai-dev`、TUNA 源。
@@ -37,9 +39,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent-via-wsl.ps1 -Act
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent-via-wsl.ps1 -Action Open -DistroName ai-dev
 ```
 
-首次使用时选择凭据库密码策略；真实网站账号按需登录。本仓库不复制其他电脑的凭据库设置、网站登录或 Codex 凭据。使用 Windows 上的 Codex 控制这台工作机，无需在 Linux 中再次登录 Codex。
+安装确认中会说明：新凭据库自动初始化为空密码，已有库和旧密码保留；真实网站账号按需登录。本仓库不复制其他电脑的凭据库设置、网站登录或 Codex 凭据。使用 Windows 上的 Codex 控制这台工作机，无需在 Linux 中再次登录 Codex。
 
-若希望免除新凭据库密码输入，可明确选择 **09 → 13 初始化新凭据库为空密码 / Keyring**，原生 Debian 为 **14 → 9**。此操作仅初始化新库，保留已有凭据库和旧凭据，不关闭浏览器或重启实例；已有带密码的库仍需自己解锁。空密码会降低本机凭据的保护，确认前会展示影响。
+常规安装会自动完成新凭据库初始化，无需另选专项菜单；仅需单独检查此项时使用 **09 → 13 初始化新凭据库为空密码 / Keyring**，原生 Debian 为 **14 → 9**。此操作仅初始化新库，保留已有凭据库和旧凭据，不关闭浏览器或重启实例；已有带密码的库仍需自己解锁。空密码会降低本机凭据的保护，确认前会展示影响。
 
 只有希望直接在 Linux 中使用 Codex CLI 时，才需要另行授权；以下命令为可选项：
 
@@ -48,13 +50,13 @@ wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex l
 wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex
 ```
 
-“一键部署”指软件环境自动安装；凭据库策略和真实网站账号登录由使用者选择。Linux Codex CLI 及其授权均不是浏览器工作机运行的前提。
+“一键部署”指软件环境自动安装；真实网站账号登录由使用者完成。Linux Codex CLI 及其授权均不是浏览器工作机运行的前提。
 
 ### 由 Windows Codex 控制现有工作机
 
-若希望 Windows Codex 使用普通 SSH 命令，初始化完成后会准备专用 SSH 服务和 `oneDebian-<实例名>` 别名；已有工作机使用 **09 → 14 SSH** 补配置。默认示例为 `ssh oneDebian-ai-dev`，命令可写成 `ssh oneDebian-ai-dev 'cd ~/workspaces/my-app && pnpm dev'`。这仍是 Windows Codex 调用 SSH，不是设置中的“SSH 远程项目”，无需在 Linux 中授权 Codex。
+若希望 Windows Codex 使用普通 SSH 命令，初始化完成后会准备专用 SSH 服务和 `oneDebian-<实例名>` 别名；已有工作机通过 **09 → 2 安装／检查补齐** 自动补配置。默认示例为 `ssh oneDebian-ai-dev`，命令可写成 `ssh oneDebian-ai-dev 'cd ~/workspaces/my-app && pnpm dev'`。这仍是 Windows Codex 调用 SSH，不是设置中的“SSH 远程项目”，无需在 Linux 中授权 Codex。
 
-使用 `-NoWait` 时只提交后台安装；完成后再执行 Resume 或 **09 → 14 SSH**。已有实例可直接运行 `./agent-via-wsl.ps1 -Action Ssh -DistroName debian-wsl-main`；SSH 端口冲突时用 `-SshPort 2223` 等明确指定其他端口。回环 SSH 不直接向局域网开放。原生 Debian 可通过 **14 → 10** 提供公钥后配置，或继续使用原有 SSH 服务。
+使用 `-NoWait` 时只提交后台安装；通过状态入口查看，完成后再次选择 **09 → 2 安装／检查补齐**，自动检查 SSH 和查看入口。已有配置的自定义 SSH 端口会沿用；只有明确调整端口时才在 **09 → 14 SSH** 使用 `-SshPort 2223` 等参数。回环 SSH 不直接向局域网开放。原生 Debian 可通过 **14 → 10** 提供公钥后配置，或继续使用原有 SSH 服务。
 
 别名的 `ProxyCommand` 通过 `wsl.exe --distribution <实例名> --user agent --exec /usr/bin/nc 127.0.0.1 2222` 进入指定实例，使用实例名而非 WSL 的 NAT IP。它不创建 Windows 22 端口的监听，也不修改全局 WSL 网络，因此 `ssh 127.0.0.1` 不是这个入口。端口被占用时会拒绝，保留原服务。
 
@@ -97,7 +99,7 @@ wsl.exe -d ai-dev -u agent -- bash -lc 'cd /home/agent/workspaces/my-app && /hom
 wsl.exe --distribution ai-dev --user root --exec /bin/bash /opt/onedebian-agent/agent.sh verify --browser
 ```
 
-若后台驻留或可选的 Windows 登录自启无法验证，创建流程会保留实例和安装器并报告原错误，不会继续提交安装任务。先在 **07 状态** 修复该实例对应策略，再使用 **09 → 3 继续安装**；命令行创建时自定义过镜像源或端口的，继续时也应传入原参数。
+若后台驻留或可选的 Windows 登录自启无法验证，创建流程会保留实例和安装器并报告原错误，不会继续提交安装任务。先在 **07 状态** 修复该实例对应策略，再使用 **09 → 2 安装／检查补齐**；若尚未提交过安装任务，自定义镜像源和端口仍需使用原参数。已进入安装的工作机自动沿用其配置。
 
 实机验收已覆盖 Windows x64 + WSL2 的新 Debian 13 实例：MCP 输入／点击／截图、noVNC 原生键鼠、接管与交还、实例冷启动、页面与合成 Cookie 保留，以及 Codex 登录保留。ARM64 和原生 Debian 共用安装逻辑，但尚未完成各自硬件上的全链路实测；GPU 加速由目标机器验收决定，失败使用软件渲染。
 
@@ -107,7 +109,7 @@ wsl.exe --distribution ai-dev --user root --exec /bin/bash /opt/onedebian-agent/
 .\agent-via-wsl.ps1 -Action Install -DistroName <指定的WSL2实例>
 ```
 
-默认保留已有镜像源、挂载和互操作设置。如 PID 1 不是 systemd，会提示只重启该实例；可以推迟。已有 `agent` 账号须明确使用 `-AdoptUser`，工具不改变其密码，也不导入任何旧凭据。
+默认保留已有镜像源、挂载和互操作设置。首次安装中断时沿用当时已确认的软件源，完成安装后检查补齐默认保留用户当前源。如 PID 1 不是 systemd，会提示只重启该实例；可以推迟。首次使用非本工具管理的 `agent` 账号须明确确认接纳或使用 `-AdoptUser`；本工具已经接纳的账号无需再次确认。工具不改变其密码，也不导入任何旧凭据。已有工作机再次安装不会重复首次启动初始化、网络保护或隔离设置。
 
 `agent` 应为专用账号，不与其他正在使用的图形桌面共用用户 D-Bus 会话。
 
@@ -119,11 +121,10 @@ wsl.exe --distribution ai-dev --user root --exec /bin/bash /opt/onedebian-agent/
 sudo bash ./agent.sh plan
 sudo bash ./agent.sh install --wait
 sudo bash ./agent.sh status
-sudo bash ./agent.sh resume --wait
 sudo bash ./agent.sh verify --browser
 ```
 
-只安装必要依赖，不执行 `apt upgrade`，不调用原桌面／nvm 菜单，不安装显示管理器或改变物理桌面。`--mirror tuna|ustc|official` 是显式换源；默认 `keep`。不足建议资源时默认停止，了解影响后可明确加 `--allow-low-resources`。端口可用 `--viewer-port`、`--mcp-port`、`--cdp-port` 修改。
+只安装必要依赖，不执行 `apt upgrade`，不调用原桌面／nvm 菜单，不安装显示管理器或改变物理桌面。中断或需要补齐时更新仓库后再次执行同一条 `sudo bash ./agent.sh install --wait`。`--mirror tuna|ustc|official` 是显式换源；已有环境默认保留当前源，首次安装中断时沿用已确认源。首次资源不足时默认停止，了解影响后可明确加 `--allow-low-resources`；已通过预检的安装不会因正常消耗磁盘再次要求 32 GiB 空闲，但实际空间不足仍会报错。新装端口可用 `--viewer-port`、`--mcp-port`、`--cdp-port` 设置，已有配置自动沿用。
 
 ## Codex、查看与接管
 
@@ -168,7 +169,7 @@ Windows 通过 **09 → 打开桌面** 或 `-Action Open` 自动携带本地令�
 
 **09 → 8／9／10** 分别启动、停止、查看专用转发，也可使用 `-Action RelayStart|RelayStop|RelayStatus`。转发只在 Windows 当前用户会话中运行；只绑定 `127.0.0.1` 的 noVNC／MCP 同号端口，经 `wsl.exe` 把字节送入明确选定的发行版，不转发 CDP，不在 Windows 部署 MCP。端口仍以工作机 `status` 为准。
 
-转发器通过本机 .NET Framework 编译，无须管理员或 Windows Python。旧版工作机需要先单独升级受管组件；对已 READY 的环境执行 `Install`／`Resume` 不会自动升级这些组件。新建工作机已包含所需组件。转发器代码升级时如检测到旧版转发仍运行，请先 `RelayStop` 再 `RelayStart`。停止转发只断开查看／MCP 连接，保留 Debian、浏览器页面和构建任务；人工接管时 MCP 暂停不妨碍桌面查看。卸载工作机前会先停止它自己的本机转发。
+转发器通过本机 .NET Framework 编译，无须管理员或 Windows Python。更新仓库后再次执行安装／检查补齐，即使已 READY，也会使用最新受管组件并检查连接入口；健康的 SSH 和转发配置优先复用。转发器代码升级时如检测到旧版转发仍运行，请先 `RelayStop` 再 `RelayStart`。停止转发只断开查看／MCP 连接，保留 Debian、浏览器页面和构建任务；人工接管时 MCP 暂停不妨碍桌面查看。卸载工作机前会先停止它自己的本机转发。
 
 接管会停止 MCP，保留浏览器、页面及独立构建任务；人工标记跨重启保留。断开 MCP、查看页或 SSH 隧道不退出桌面。令牌文件权限为 0600，状态与日志不输出令牌。查看入口校验 Host/Origin 并禁止 iframe 嵌入。
 
@@ -196,22 +197,22 @@ GPU 分为原生 DRM 和 WSL DXG／Mesa D3D12 两条路径。`/dev/dxg` 不是 D
 
 本机 i5-1240P 的独立 VNC 桌面已直接实测通过 D3D12 原生 EGL 和 Chromium WebGL1/2 实际着色／像素回读；另一台 i5-1340P 为用户回传正式脚本验收通过。其他目标机器仍需运行上述检查。GPU 验收可单独运行 `sudo bash ./agent.sh verify --gpu`；软件模式下该硬件验收应失败，普通浏览器验收仍应通过。
 
-安装任务由 `onedebian-agent-install.service` 执行，关闭进度窗口不会主动取消后台任务，但 WSL 实例仍需保持运行。已有实例的驻留策略不会自动改变，可在 **07 状态** 中确认。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。重新运行不会启动第二个并发任务；中断后使用 Resume，保留已下载文件。
+安装任务由 `onedebian-agent-install.service` 执行，关闭进度窗口不会主动取消后台任务，但 WSL 实例仍需保持运行。已有实例的驻留策略不会自动改变，可在 **07 状态** 中确认。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。再次执行 Install 会暂存当前仓库代码；任务仍运行时只观察，不启动第二个并发任务；中断后再次执行同一入口，保留已下载文件和原配置。
 
 安装阶段停留较久时，先查看 `install.log` 中的最后几行，区分仍在下载、重试或已经失败。网络、DNS、代理以及上游服务可达性都会影响耗时；国内 APT 源只影响 APT，不能加速 GitHub、Node.js 或 npm 的下载。个别下载有各自的超时和重试，但 APT、fnm 安装 Node 和 npm 安装没有统一覆盖的阶段总超时，不能保证网络异常会在固定时间内结束。
 
 Windows 安装等待界面每 10 秒显示进度，中文说明后用一个简短英文标签概括：
 
 ```text
-[00:05:46] debian-wsl-main：[2/5] 安装系统依赖：桌面、浏览器、中文支持 / Packages
-[00:05:56] debian-wsl-main：[3/5] 安装开发工具：fnm、Node.js、Codex CLI、浏览器 MCP / Runtime
+[00:05:46] debian-wsl-main：[2/5] 检查并补齐系统依赖：桌面、浏览器、中文支持 / Packages
+[00:05:56] debian-wsl-main：[3/5] 检查并补齐开发工具：fnm、Node.js、Codex CLI、浏览器 MCP / Runtime
 ```
 
-时间是本次等待已用时，继续安装时重新计时，不是剩余时间；`2/5`、`3/5` 是阶段序号，不是下载百分比。后续阶段为配置和启动工作环境（Services）、运行检查（Verification），最后显示软件渲染或硬件加速就绪。失败时仍保留错误原文和日志路径；JSON／状态文件中的阶段码不变。
+时间是本次等待已用时，再次执行安装时重新计时，不是剩余时间；`2/5`、`3/5` 是阶段序号，不是下载百分比。后续阶段为配置和启动工作环境（Services）、运行检查（Verification），最后显示软件渲染或硬件加速就绪。失败时仍保留错误原文和日志路径；JSON／状态文件中的阶段码不变。
 
 ```bash
 sudo tail -n 40 /var/lib/onedebian-agent/install.log
-sudo bash /opt/onedebian-agent/agent.sh resume --wait
+sudo bash /opt/onedebian-agent/agent.sh install --wait
 sudo bash /opt/onedebian-agent/agent.sh verify --browser
 sudo bash /opt/onedebian-agent/agent.sh uninstall --yes
 ```
@@ -235,7 +236,7 @@ Windows 也可从仓库目录执行：
 
 安装任务仍运行时会拒绝清理。清理中检测到计划变化、外部依赖或归属不明的内容时，不会跳过检查强删；请按结果中的保留／阻止原因处理。恢复的 WSL 启动设置若需重启生效，由使用者另行安排，只影响所选实例。
 
-另行确认的 WSL 首次启动初始化和 eth0 网络保护会保留，由对应菜单管理。清理失败后，重新选择撤销入口会根据剩余内容生成新计划；Resume 用于恢复安装，会重新安装环境。
+另行确认的 WSL 首次启动初始化和 eth0 网络保护会保留，由对应菜单管理。清理失败后，重新选择撤销入口会根据剩余内容生成新计划；安装／检查补齐入口用于安装环境，不能代替撤销。
 
 清理执行时，原生命令输出保存到仅 root 可读的 `/var/lib/onedebian-agent/cleanup.log`，不混入 JSON 结果；Windows 无论清理完成还是失败都会显示返回的日志路径。排查时可在目标系统运行 `sudo tail -n 80 /var/lib/onedebian-agent/cleanup.log`。计划预览没有执行清理，不代表已经产生该日志。
 

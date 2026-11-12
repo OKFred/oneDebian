@@ -1,39 +1,105 @@
 #!/usr/bin/env bash
 # Dedicated Agent entry; existing Node/desktop installers stay independent.
+the_agent_resources_prechecked() {
+  # Match install's resource waiver; preparing WSL/user ownership alone is insufficient.
+  python3 - <<'PY'
+import json
+from pathlib import Path
+import stat
+import sys
+
+owner = 'oneDebian-agent-v1'
+root, etc, state = map(Path, ('/opt/onedebian-agent', '/etc/onedebian-agent', '/var/lib/onedebian-agent'))
+try:
+    for directory in (root, etc, state):
+        if any(item.is_symlink() for item in (*directory.parents, directory)):
+            raise ValueError('Symlink metadata')
+        for item in (directory, directory / '.owner'):
+            info = item.stat(follow_symlinks=False)
+            if info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+                raise ValueError('Unowned metadata')
+        if (directory / '.owner').read_text() != owner:
+            raise ValueError('Owner mismatch')
+    def read(path):
+        if path.is_symlink():
+            raise ValueError('Symlink metadata file')
+        if not path.exists():
+            return {}
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('Unowned metadata file')
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError('Invalid metadata')
+        return data
+    config = read(etc / 'config.json')
+    previous = read(state / 'state.json')
+    installed = read(state / 'installed.json')
+    passed = config and (installed.get('owner') == owner or previous.get('precheck_passed')
+        or previous.get('state') in ('PRECHECK', 'PACKAGES', 'RUNTIME', 'SERVICES', 'VERIFY', 'ERROR'))
+except (OSError, ValueError):
+    passed = False
+sys.exit(0 if passed else 1)
+PY
+}
+
 the_agent_environment() {
-  local action choice mirror=keep viewer=16080 mcp=18931 cdp=19222 report answer plan_id public_key key_file ssh_port
+  local action choice mirror=keep viewer=16080 mcp=18931 cdp=19222 report answer plan_id public_key key_file ssh_port prepared=false resource_prechecked=false has_python=false cpu memory free_kib
   local -a flags=()
   local entry="$MENU_DIR/agent.sh"
   printf '\n14 Agent 环境 / Agent workstation (Debian 13)\n'
-  printf '1. 安装 / Install\n2. 继续安装 / Resume\n3. 状态 / Status\n4. 浏览器验收 / Verify browser\n5. 查看入口 / Viewer\n6. 卸载服务（保留资料）/ Uninstall services\n7. 撤销 Agent 安装（保留系统和资料） / Undo\n8. 重新检测／启用加速 / Graphics\n9. 初始化新凭据库为空密码（保留已有库） / Keyring\n10. 配置回环密钥 SSH / SSH\n11. 更新桌面控件与浏览器入口 / Desktop update\n0. 返回 / Back\n'
+  printf '1. 安装／检查补齐 / Install\n3. 状态 / Status\n4. 浏览器验收 / Verify browser\n5. 查看入口 / Viewer\n6. 卸载服务（保留资料）/ Uninstall services\n7. 撤销 Agent 安装（保留系统和资料） / Undo\n8. 重新检测／启用加速 / Graphics\n9. 初始化新凭据库为空密码（保留已有库） / Keyring\n10. 配置回环密钥 SSH / SSH\n11. 更新桌面控件与浏览器入口 / Desktop update\n0. 返回 / Back\n'
   read -r -p '选择 / Choice: ' choice
   case "$choice" in
-    1)
-      read -r -p 'APT 源 keep/tuna/ustc/official [keep]: ' mirror
-      mirror=${mirror:-keep}
-      case "$mirror" in keep|tuna|ustc|official) ;; *) echo 'Invalid mirror'; return 1 ;; esac
-      read -r -p 'noVNC port [16080]: ' viewer
-      read -r -p 'MCP port [18931]: ' mcp
-      read -r -p 'CDP port [19222]: ' cdp
-      flags=(--mirror "$mirror" --viewer-port "${viewer:-16080}" --mcp-port "${mcp:-18931}" --cdp-port "${cdp:-19222}")
-      report=$(bash "$entry" plan "${flags[@]}") || return 1
+    1|2)
+      if command -v python3 >/dev/null 2>&1; then has_python=true; fi
+      if [[ -f /var/lib/onedebian-agent/.owner && ! -L /var/lib/onedebian-agent/.owner &&
+            $(cat /var/lib/onedebian-agent/.owner) == oneDebian-agent-v1 &&
+            -f /var/lib/onedebian-agent/user-owned && ! -f /var/lib/onedebian-agent/cleanup-completed.json ]]; then
+        prepared=true
+        if [[ $has_python == true ]] && the_agent_resources_prechecked; then resource_prechecked=true; fi
+        printf '检查并补齐已有工作机：沿用端口、资料和已确认设置，保留当前软件源；首次安装中断时沿用已选源。\n'
+      else
+        read -r -p 'APT 源 keep/tuna/ustc/official [keep]: ' mirror
+        mirror=${mirror:-keep}
+        case "$mirror" in keep|tuna|ustc|official) ;; *) echo 'Invalid mirror'; return 1 ;; esac
+        read -r -p 'noVNC port [16080]: ' viewer
+        read -r -p 'MCP port [18931]: ' mcp
+        read -r -p 'CDP port [19222]: ' cdp
+        flags=(--mirror "$mirror" --viewer-port "${viewer:-16080}" --mcp-port "${mcp:-18931}" --cdp-port "${cdp:-19222}")
+      fi
+      if [[ $has_python == true ]]; then
+        report=$(bash "$entry" plan "${flags[@]}") || return 1
+      else
+        printf '缺少 Python3：确认安装后先补齐 Python，再检查和安装工作环境。 / Python bootstrap after confirmation.\n'
+        cpu=$(getconf _NPROCESSORS_ONLN) || return 1
+        memory=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo) || return 1
+        free_kib=$(df -Pk / | awk 'END {print $4}') || return 1
+        if [[ ! $cpu =~ ^[0-9]+$ || ! $memory =~ ^[0-9]+$ || ! $free_kib =~ ^[0-9]+$ ]]; then
+          printf '无法读取 CPU、内存和可用磁盘，未开始安装。 / Cannot verify resources.\n'
+          return 1
+        fi
+        printf -v report 'CPU: %s | RAM KiB: %s | Root free KiB: %s' "$cpu" "$memory" "$free_kib"
+        if (( cpu < 4 || memory < 7864320 || free_kib < 33554432 )); then
+          report+=$'\nwarnings: 建议 4 CPU / 8 GiB RAM / 32 GiB 空闲磁盘。 / Below recommended resources.'
+        fi
+      fi
       printf '%s\n' "$report"
       if id agent >/dev/null 2>&1 && [[ ! -f /var/lib/onedebian-agent/user-owned ]]; then
         read -r -p '已有 agent 用户，使用此账号并保留密码和资料？[y/N]: ' answer
         [[ $answer == [yY] ]] || return 0
         flags+=(--adopt-user)
       fi
-      if grep -q '^warnings:' <<< "$report"; then
+      if [[ $resource_prechecked != true ]] && grep -q '^warnings:' <<< "$report"; then
         read -r -p '资源不足，仍继续？[y/N]: ' answer
         [[ $answer == [yY] ]] || return 0
         flags+=(--allow-low-resources)
       fi
       printf '新凭据库自动设为空密码（未加密）；已有库保留；全局安装 pnpm。\n'
-      read -r -p '安装以上环境？只安装依赖，不做全系统升级。[y/N]: ' answer
+      read -r -p '安装／检查补齐以上环境？保留正常组件，不做全系统升级。[y/N]: ' answer
       [[ $answer == [yY] ]] || return 0
       bash "$entry" install --wait "${flags[@]}"
       ;;
-    2) bash "$entry" resume --wait ;;
     3) bash "$entry" status ;;
     4) bash "$entry" verify --browser ;;
     5)

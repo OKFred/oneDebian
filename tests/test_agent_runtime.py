@@ -90,7 +90,7 @@ class RuntimeTests(unittest.TestCase):
         inherited = {name: 'inherited-override' for name in runtime.GRAPHICS_VARIABLES}
         with mock.patch.dict(os.environ, inherited):
             for backend, node, expected in [('software', '', {'LIBGL_ALWAYS_SOFTWARE':'true', 'GALLIUM_DRIVER':'llvmpipe'}),
-                    ('d3d12', '', {'GALLIUM_DRIVER':'d3d12', 'MESA_D3D12_DEFAULT_ADAPTER_NAME':'Intel'}),
+                    ('d3d12', '', {'GALLIUM_DRIVER':'d3d12'}),
                     ('drm', '/dev/dri/renderD129', {})]:
                 with self.subTest(backend=backend):
                     cfg = dict(config(), gpu_backend=backend, render_node=node)
@@ -99,6 +99,7 @@ class RuntimeTests(unittest.TestCase):
                     self.assertEqual(runtime.graphics_environment(cfg), expected)
                     self.assertEqual(env['DISPLAY'], ':10')
                     self.assertNotIn('WAYLAND_DISPLAY', env)
+                    self.assertNotIn('MESA_D3D12_DEFAULT_ADAPTER_NAME', env)
             self.assertTrue(all(os.environ[name] == value for name, value in inherited.items()))
 
     def test_d3d12_keeps_the_private_desktop_and_sandboxed_browser(self):

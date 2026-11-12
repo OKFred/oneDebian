@@ -116,6 +116,7 @@ def status():
     data['log'] = str(logfile)
     data['config'] = read_json(ETC / 'config.json', {})
     data['versions'] = read_json(ETC / 'versions.json', {})
+    data['ssh'] = read_json(STATE / 'ssh.json', {})
     if data['versions']:
         data['first_use'] = 'Windows Codex 可直接使用本机转发的 MCP，无需 Linux Codex 授权；已有加密 keyring 仍需自行解锁。'
     return data
@@ -142,7 +143,7 @@ def owned_directories():
 
 
 def prepare_changes():
-    """Capture before the first change, retaining the original baseline across Resume."""
+    """Capture before the first change, retaining the original baseline across retries."""
     owned_directories()
     installer = sys.modules[__name__]
     if (STATE / 'cleanup-completed.json').exists():
@@ -220,7 +221,7 @@ def config_for(options):
 
 def plan(options):
     require_debian()
-    config = read_json(ETC / 'config.json', config_for(options))
+    config = read_json(ETC / 'config.json') or config_for(options)
     cpu = os.cpu_count() or 0
     memory = int(next(x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemTotal:'))) * 1024
     free = shutil.disk_usage('/home' if Path('/home').exists() else '/').free
@@ -317,16 +318,27 @@ def packages(options):
         helper = ROOT / 'components' / 'the_repo_localization.sh'
         if not helper.exists(): raise RuntimeError('Missing shared APT source helper')
         run(['bash', '-c', 'source "$1"; the_localize_apt_sources Debian trixie /etc/apt "$2"', '--', helper, options.mirror])
+    architecture = capture(['dpkg', '--print-architecture'])
+    inventory = capture(['dpkg-query', '-W', '-f=${Package}\t${Architecture}\t${db:Status-Status}\n'])
+    installed = set()
+    for line in inventory.splitlines():
+        fields = line.split('\t')
+        if len(fields) == 3 and fields[1] in (architecture, 'all') and fields[2] == 'installed':
+            installed.add(fields[0])
+    missing = [name for name in PACKAGES if name not in installed]
+    print('系统依赖 / Packages: ' + (', '.join(missing) if missing else '已齐全 / Ready; 无需下载'), flush=True)
+    if not missing: return False
     env = dict(os.environ, DEBIAN_FRONTEND='noninteractive', APT_LISTCHANGES_FRONTEND='none')
     run(['apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], env=env)
     installer = sys.modules[__name__]
     package_undo.prepare(installer)
     command = ['apt-get', 'install', '-y', '--no-install-recommends', '-o', 'Dpkg::Options::=--force-confdef',
-               '-o', 'Dpkg::Options::=--force-confold', *PACKAGES]
+               '-o', 'Dpkg::Options::=--force-confold', *missing]
     try:
         run(package_undo.install_args(installer, command), env=env)
     finally:
         package_undo.finish(installer)
+    return True
 
 
 def install_runtime(user):
@@ -338,38 +350,89 @@ def install_runtime(user):
             directory.mkdir(parents=True, exist_ok=True)
     arch = capture(['dpkg', '--print-architecture'])
     if arch not in FNM: raise RuntimeError(f'Unsupported fnm architecture: {arch}')
-    asset, digest = FNM[arch]
-    cache = STATE / 'downloads'
-    cache.mkdir(exist_ok=True)
-    archive = cache / asset
-    if not archive.exists() or hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
-        url = f'https://github.com/Schniz/fnm/releases/download/{VERSIONS["fnm"]}/{asset}'
-        run(['curl', '--fail', '--location', '--retry', '3', '--connect-timeout', '20', '--max-time', '600', '-o', archive, url])
-    if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
-        raise RuntimeError('fnm SHA256 mismatch; nothing extracted')
-    with zipfile.ZipFile(archive) as z:
-        binary = z.read('fnm')
     target = fnm_dir / 'fnm'
+    fnm = [str(target), '--fnm-dir', str(fnm_dir)]
+    changed = False
+    def changing(refresh_mcp=True):
+        nonlocal changed
+        state = read_json(STATE / 'state.json', {})
+        if refresh_mcp and not state.get('runtime_refresh_pending'):
+            state['runtime_refresh_pending'] = True
+            write_json(STATE / 'state.json', state)
+        changed = True
+    def output(command):
+        try: return as_user(user, command, capture_output=True, text=True, timeout=30).stdout.strip()
+        except (subprocess.SubprocessError, OSError): return None
     with user_files(user):
         if target.is_symlink(): raise RuntimeError('Refusing fnm symlink')
-        if target.exists() and target.read_bytes() != binary:
-            raise RuntimeError('An existing fnm binary differs from the pinned release; review it before replacing it')
-        if not target.exists():
-            target.write_bytes(binary)
+        fnm_exists = target.is_file()
+    if not fnm_exists or output([*fnm, '--version']) != 'fnm ' + VERSIONS['fnm'].removeprefix('v'):
+        changing()
+        asset, digest = FNM[arch]
+        cache = STATE / 'downloads'
+        cache.mkdir(exist_ok=True)
+        archive = cache / asset
+        if not archive.exists() or hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
+            url = f'https://github.com/Schniz/fnm/releases/download/{VERSIONS["fnm"]}/{asset}'
+            run(['curl', '--fail', '--location', '--retry', '3', '--connect-timeout', '20', '--max-time', '600', '-o', archive, url])
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
+            raise RuntimeError('fnm SHA256 mismatch; nothing extracted')
+        with zipfile.ZipFile(archive) as z: binary = z.read('fnm')
+        with user_files(user):
+            if target.exists() and target.read_bytes() != binary:
+                raise RuntimeError('An existing fnm binary differs from the pinned release; review it before replacing it')
+            if not target.exists(): target.write_bytes(binary)
             target.chmod(0o755)
-    fnm = [str(target), '--fnm-dir', str(fnm_dir)]
-    as_user(user, [*fnm, 'install', VERSIONS['node']])
+        if output([*fnm, '--version']) != 'fnm ' + VERSIONS['fnm'].removeprefix('v'):
+            raise RuntimeError('Unexpected fnm runtime version')
+    node_bin = fnm_dir / 'node-versions' / VERSIONS['node'] / 'installation/bin'
+    with user_files(user): node_exists = (node_bin / 'node').is_file()
+    version = output([*fnm, 'exec', '--using=' + VERSIONS['node'], 'node', '--version']) if node_exists else None
+    if version != VERSIONS['node']:
+        changing()
+        as_user(user, [*fnm, 'install', VERSIONS['node']])
+        with user_files(user): node_exists = (node_bin / 'node').is_file()
+        version = output([*fnm, 'exec', '--using=' + VERSIONS['node'], 'node', '--version']) if node_exists else None
     as_user(user, [*fnm, 'default', VERSIONS['node']])
-    version = as_user(user, [*fnm, 'exec', '--using=' + VERSIONS['node'], 'node', '--version'], capture_output=True, text=True).stdout.strip()
     if version != VERSIONS['node']: raise RuntimeError(f'Unexpected Node runtime: {version}')
-    as_user(user, [*fnm, 'exec', '--using=' + version, 'npm', 'install', '--global', 'pnpm@' + VERSIONS['pnpm']])
-    pnpm = as_user(user, [*fnm, 'exec', '--using=' + version, 'pnpm', '--version'], capture_output=True, text=True).stdout.strip()
-    if pnpm != VERSIONS['pnpm']: raise RuntimeError('Unexpected global pnpm version: ' + pnpm)
+    with user_files(user): pnpm_exists = (node_bin / 'pnpm').is_file()
+    pnpm = output([*fnm, 'exec', '--using=' + version, str(node_bin / 'pnpm'), '--version']) if pnpm_exists else None
+    if pnpm != VERSIONS['pnpm']:
+        changing(refresh_mcp=False)
+        as_user(user, [*fnm, 'exec', '--using=' + version, 'npm', 'install', '--global', 'pnpm@' + VERSIONS['pnpm']])
+        with user_files(user): pnpm_exists = (node_bin / 'pnpm').is_file()
+        pnpm = output([*fnm, 'exec', '--using=' + version, str(node_bin / 'pnpm'), '--version']) if pnpm_exists else None
+    if pnpm != VERSIONS['pnpm']: raise RuntimeError('Unexpected global pnpm version: ' + str(pnpm))
     tools = data / 'tools'
-    as_user(user, [*fnm, 'exec', '--using=' + version, 'npm', 'install', '--prefix', str(tools),
-                   '--save-exact', '@playwright/mcp@' + VERSIONS['mcp'], '@openai/codex@' + VERSIONS['codex']])
-    write_json(ETC / 'versions.json', dict(VERSIONS, node=version))
-    atomic(ETC / 'node-version', version + '\n')
+    tool_entries = [('mcp', '@playwright/mcp', 'cli.js', 'Version '), ('codex', '@openai/codex', 'bin/codex.js', 'codex-cli ')]
+    def tool_ready(key, package, entry, prefix):
+        folder = tools / 'node_modules' / package
+        with user_files(user):
+            cleanup._parents(folder)
+            try: ready = read_json(folder / 'package.json', {}).get('version') == VERSIONS[key] and (folder / entry).is_file()
+            except (OSError, ValueError): ready = False
+        return ready and output([*fnm, 'exec', '--using=' + version, 'node', str(folder / entry), '--version']) in (VERSIONS[key], prefix + VERSIONS[key])
+    missing_tools = [entry for entry in tool_entries if not tool_ready(*entry)]
+    if missing_tools:
+        changing(refresh_mcp=any(entry[0] == 'mcp' for entry in missing_tools))
+        with user_files(user):
+            for key, package, entry, prefix in missing_tools:
+                folder = tools / 'node_modules' / package
+                cleanup._parents(folder)
+                if folder.exists():
+                    if not folder.is_dir(): raise RuntimeError('Tool package is not a directory: ' + str(folder))
+                    retained = data / 'retained-packages'
+                    cleanup._parents(retained)
+                    retained.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    backup = retained / (key + '-' + secrets.token_hex(6))
+                    folder.rename(backup)
+                    print('保留损坏工具包 / Retained: ' + str(backup), flush=True)
+        specs = [package + '@' + VERSIONS[key] for key, package, entry, prefix in missing_tools]
+        as_user(user, [*fnm, 'exec', '--using=' + version, 'npm', 'install', '--prefix', str(tools), '--save-exact', *specs])
+    if not all(tool_ready(*entry) for entry in tool_entries): raise RuntimeError('Pinned MCP or Codex runtime is incomplete')
+    recorded = read_json(ETC / 'versions.json', {})
+    if recorded != dict(VERSIONS, node=version):
+        changing(refresh_mcp=any(recorded.get(key) != VERSIONS[key] for key in ('fnm', 'node', 'mcp')))
     shell = home / '.bashrc'
     with user_files(user): content = shell.read_text() if shell.exists() else ''
     marker = '# oneDebian Agent fnm'
@@ -394,6 +457,12 @@ def install_runtime(user):
             atomic(config_file, f'[mcp_servers.vm_browser]\nurl = "http://127.0.0.1:{port}/mcp"\nstartup_timeout_sec = 30\ntool_timeout_sec = 120\ndisabled_tools = ["browser_close"]\n', 0o600)
     else:
         print('Existing Codex configuration retained; merge vm_browser settings from the guide if necessary.', flush=True)
+    if read_json(ETC / 'versions.json') != dict(VERSIONS, node=version):
+        write_json(ETC / 'versions.json', dict(VERSIONS, node=version))
+    if not (ETC / 'node-version').exists() or (ETC / 'node-version').read_text() != version + '\n':
+        atomic(ETC / 'node-version', version + '\n')
+    print('开发工具 / Runtime: ' + ('已补齐 / Repaired' if changed else '已齐全 / Ready; 无需下载'), flush=True)
+    return changed
 
 
 def unit_environment(user):
@@ -420,15 +489,19 @@ def browser_preference(text, key, value, section=None):
     return ''.join(lines)
 
 
-def default_browser(user):
+def default_browser(user, preserve_preferences=False):
     home = Path(user.pw_dir)
     application = (ROOT / 'desktop/agent-browser.desktop').read_text()
     helper = (ROOT / 'xfce/agent-browser.desktop').read_text()
     owned_file(home / '.local/share/applications/agent-browser.desktop', application, user=user)
     owned_file(home / '.local/share/xfce4/helpers/agent-browser.desktop', helper, user=user)
     updates = {}
+    previous = read_json(STATE / cleanup.LEDGER, {}).get('browser_defaults', {}) if preserve_preferences else {}
     for relative in ('.config/xfce4/helpers.rc', '.config/xfce-mimeapps.list'):
         path = home / relative
+        if str(path) in previous:
+            print('保留用户浏览器偏好 / Preferences retained: ' + str(path), flush=True)
+            continue
         with user_files(user):
             if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_size > cleanup.LIMIT)):
                 raise RuntimeError('Unsafe browser preference file: ' + str(path))
@@ -464,7 +537,7 @@ def install_browser_start():
         candidate.unlink(missing_ok=True)
 
 
-def desktop_launchers(user):
+def desktop_launchers(user, preserve_preferences=False):
     install_browser_start()
     desktop_dir = Path(user.pw_dir) / 'Desktop'
     autostart = Path(user.pw_dir) / '.config/autostart'
@@ -473,7 +546,7 @@ def desktop_launchers(user):
         owned_file(dest, src.read_text(), 0o755, user=user)
     for folder in (desktop_dir, autostart, autostart.parent):
         with user_files(user): folder.mkdir(parents=True, exist_ok=True)
-    default_browser(user)
+    default_browser(user, preserve_preferences=True) if preserve_preferences else default_browser(user)
 
 
 def services(user):
@@ -491,7 +564,7 @@ def services(user):
         condition = f'ExecCondition={runtime} mcp-permitted\n' if name == 'mcp' else ''
         content = f'[Unit]\nDescription=oneDebian Agent {name}\n\n[Service]\n{condition}ExecStart={runtime} {name}\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=10\n\n[Install]\nWantedBy=default.target\n'
         owned_file(Path('/etc/systemd/user') / f'onedebian-agent-{name}.service', content)
-    desktop_launchers(user)
+    desktop_launchers(user, preserve_preferences=True)
     run(['systemctl', 'daemon-reload'])
     run(['systemctl', 'enable', 'onedebian-agent-desktop.service', 'onedebian-agent-chromium.service'])
     user_ctl(user, 'daemon-reload')
@@ -501,6 +574,34 @@ def services(user):
 def start_desktop():
     run(['systemctl', 'restart', 'onedebian-agent-desktop.service'])
     run(['systemctl', 'start', 'onedebian-agent-chromium.service'])
+
+
+def ensure_services(user, config, runtime_changed=False):
+    """Converge stopped services without replacing an existing desktop session."""
+    started = []
+    for name in ('desktop', 'chromium', 'novnc', 'mcp'):
+        if name == 'mcp' and runtime.manual(config): continue
+        unit = f'onedebian-agent-{name}.service'
+        system = name in ('desktop', 'chromium')
+        args = ['show', unit, '-p', 'ActiveState', '-p', 'MainPID']
+        text = capture(['systemctl', *args]) if system else user_ctl(user, *args, capture_output=True, text=True).stdout
+        fields = dict(line.split('=', 1) for line in text.splitlines() if '=' in line)
+        state, pid = fields.get('ActiveState'), fields.get('MainPID', '')
+        if not pid.isdecimal(): raise RuntimeError('Cannot verify managed service: ' + unit)
+        if state in ('active', 'activating', 'reloading'):
+            if name == 'mcp' and runtime_changed and not runtime.manual(config):
+                user_ctl(user, 'restart', unit)
+            continue
+        if state not in ('inactive', 'failed') or int(pid) != 0:
+            raise RuntimeError('Managed service is stopping or inconsistent; retry after it settles: ' + unit)
+        if name == 'mcp' and runtime.manual(config): continue
+        run(['systemctl', 'start', unit]) if system else user_ctl(user, 'start', unit)
+        started.append(name)
+    state = read_json(STATE / 'state.json', {})
+    # shortcut: manual resume can leave one pending reload; track service generations if that becomes disruptive.
+    if not runtime.manual(config) and state.pop('runtime_refresh_pending', None):
+        write_json(STATE / 'state.json', state)
+    return started
 
 
 def gpu_access(user, node):
@@ -801,7 +902,7 @@ def configure_ssh(options):
             return data
 
 
-def restart_controls(config, user):
+def restart_controls(config, user, only_missing=False):
     """Replace only the owned GTK process in the existing desktop namespace."""
     import signal
     desktop_pid = capture(['systemctl', 'show', 'onedebian-agent-desktop.service', '-p', 'MainPID', '--value'])
@@ -828,6 +929,7 @@ def restart_controls(config, user):
             if str(ROOT / 'runtime.py').encode() in args and args[-1:] in ([b'takeover'], [b'resume']): switching = True
         except (OSError, ValueError): continue
     if switching: raise RuntimeError('A browser handoff is still running; retry the desktop update after it finishes')
+    if controls and only_missing: return False
     unit = 'onedebian-agent-controls-refresh-' + secrets.token_hex(6) + '.service'
     env = runtime.environment(dict(config, uid=user.pw_uid))
     if not re.fullmatch(r':[1-9][0-9]{0,3}', env['DISPLAY']): raise RuntimeError('Invalid private desktop display')
@@ -890,12 +992,16 @@ def worker(options):
             with cleanup.tracking(installer):
                 services(user)
                 config = read_json(ETC / 'config.json')
-                if not read_json(STATE / 'installed.json') and not read_json(STATE / 'gpu.json'):
+                if config.get('probe_profile') or config.get('probe_unit'):
+                    raise RuntimeError('An interrupted GPU probe configuration needs review; no existing desktop was restarted')
+                profile = Path(user.pw_dir) / '.local/share/onedebian-agent/profile'
+                if (not read_json(STATE / 'installed.json') and not read_json(STATE / 'gpu.json')
+                        and not profile.exists() and not active('onedebian-agent-desktop.service') and not runtime.manual(config)):
                     verify_gpu(config, user)
-                start_desktop()
-                user_ctl(user, 'start', 'onedebian-agent-novnc.service')
-                if not (Path(user.pw_dir) / '.local/share/onedebian-agent/manual').exists():
-                    user_ctl(user, 'start', 'onedebian-agent-mcp.service')
+                pending = read_json(STATE / 'state.json', {}).get('runtime_refresh_pending', False)
+                started = ensure_services(user, config, pending)
+                if 'desktop' not in started:
+                    restart_controls(config, user, only_missing=True)
             phase('VERIFY')
             result = subprocess.run(['python3', str(ROOT / 'verify.py'), '--json'], capture_output=True, text=True, check=False)
             try:
@@ -906,7 +1012,9 @@ def worker(options):
             if result.returncode != 0 or not verification.get('passed'):
                 failures = [item['name'] + ': ' + item.get('error', '') for item in verification.get('checks', []) if not item.get('passed')]
                 raise RuntimeError('Verification failed: ' + '; '.join(failures or [verification.get('error', 'see verification.json')]))
-            write_json(STATE / 'installed.json', dict(owner=OWNER, installed_at=int(time.time())))
+            installed = read_json(STATE / 'installed.json', {})
+            write_json(STATE / 'installed.json', dict(installed, owner=OWNER,
+                       installed_at=installed.get('installed_at', int(time.time())), checked_at=int(time.time())))
             phase('READY_GPU' if runtime.gpu_backend(config) != 'software' else 'READY_SOFTWARE')
         except Exception as exc:
             phase('ERROR', str(exc))
@@ -936,15 +1044,18 @@ def operation_lock(create=True):
 def start_install(options):
     require_root()
     if active(): return status()
-    if read_json(STATE / 'installed.json') and status()['state'].startswith('READY_'):
-        with operation_lock(create=False):
-            return status()
+    previous = read_json(STATE / 'state.json', {})
+    options.allow_low_resources = options.allow_low_resources or previous.get('allow_low_resources', False)
     report = plan(options)
     if not report['systemd']:
         raise RuntimeError('PID 1 is not systemd. Enable it and restart only this WSL instance before installation.')
-    if report['warnings'] and not options.allow_low_resources:
-        raise RuntimeError('; '.join(report['warnings']) + '; explicit --allow-low-resources to continue')
     current = read_json(ETC / 'config.json')
+    installed = read_json(STATE / 'installed.json', {})
+    prechecked = current and (installed.get('owner') == OWNER or previous.get('precheck_passed')
+                  or previous.get('state') in ('PRECHECK', 'PACKAGES', 'RUNTIME', 'SERVICES', 'VERIFY', 'ERROR'))
+    if prechecked: cleanup._trusted(sys.modules[__name__])
+    if report['warnings'] and not options.allow_low_resources and not prechecked:
+        raise RuntimeError('; '.join(report['warnings']) + '; explicit --allow-low-resources to continue')
     if not current:
         ports = (options.viewer_port, options.mcp_port, options.cdp_port)
         if len(set(ports)) != 3: raise RuntimeError('Viewer, MCP and CDP ports must differ')
@@ -960,7 +1071,7 @@ def start_install(options):
             if not current: write_json(ETC / 'config.json', config_for(options))
         phase('PRECHECK')
         state = read_json(STATE / 'state.json')
-        state.update(mirror=options.mirror, allow_low_resources=options.allow_low_resources)
+        state.update(mirror=options.mirror, allow_low_resources=options.allow_low_resources, precheck_passed=True)
         write_json(STATE / 'state.json', state)
         args = [sys.executable, str(ROOT / 'install.py'), '_run', '--mirror', options.mirror]
         if options.adopt_user: args.append('--adopt-user')
@@ -1091,9 +1202,10 @@ def main():
     for flag in ('json', 'wait', 'yes', 'new-instance', 'harden-wsl', 'adopt-user', 'allow-low-resources'):
         parser.add_argument('--' + flag, action='store_true')
     options, extra = parser.parse_known_args()
-    if options.action == 'resume':
+    if options.action in ('install', 'resume'):
         previous = read_json(STATE / 'state.json', {})
-        if '--mirror' not in sys.argv: options.mirror = previous.get('mirror', options.mirror)
+        if not any(arg == '--mirror' or arg.startswith('--mirror=') for arg in sys.argv[1:]) and not read_json(STATE / 'installed.json'):
+            options.mirror = previous.get('mirror', options.mirror)
         options.allow_low_resources = options.allow_low_resources or previous.get('allow_low_resources', False)
     if options.action != 'verify' and extra: parser.error('Unknown arguments: ' + ' '.join(extra))
     for port in (options.viewer_port, options.mcp_port, options.cdp_port, options.ssh_port):
@@ -1102,7 +1214,7 @@ def main():
         if options.action == 'plan': data = plan(options)
         elif options.action == 'prepare-undo':
             require_root(); require_debian()
-            if active(): raise RuntimeError('Installation is active; use Resume to observe its existing job')
+            if active(): raise RuntimeError('Installation is active; use Install to observe its existing job')
             owned_directories()
             with operation_lock(): prepare_changes()
             data = dict(state='UNDO_RECORDED')

@@ -93,7 +93,7 @@ $fixtureState.Registered = @($DistroName)
             Assert-Agent ($fixtureState.Imported -and $fixtureState.Registered -contains 'fixture-ai-dev') 'failure removed or lost the imported instance'
             Assert-Agent ($fixtureState.StartupCalls -eq $case.StartupCalls -and $fixtureState.JobCalls -eq $case.Jobs) 'lifecycle failure submitted installation or skipped a verified success'
             if ($case.Error) {
-                Assert-Agent ($failure.Contains($case.Error) -and $failure.Contains('retained') -and $failure.Contains('menu 07') -and $failure.Contains('Resume')) 'original failure or accurate recovery guidance was lost'
+                Assert-Agent ($failure.Contains($case.Error) -and $failure.Contains('retained') -and $failure.Contains('menu 07') -and $failure.Contains('Install')) 'original failure or accurate recovery guidance was lost'
             } else { Assert-Agent (-not $failure) "verified lifecycle was rejected: $failure" }
         }
     } finally {
@@ -181,10 +181,10 @@ Test-Agent 'status stops a lost job and accepts actual ready states' {
 }
 Test-Agent 'progress names explain every installation stage and terminal state' {
     foreach ($case in @(
-        @('PRECHECK', '1/5', '准备安装'),
-        @('PACKAGES', '2/5', '安装系统依赖'),
-        @('RUNTIME', '3/5', '安装开发工具'),
-        @('SERVICES', '4/5', '工作环境'),
+        @('PRECHECK', '1/5', '检查安装条件'),
+        @('PACKAGES', '2/5', '补齐系统依赖'),
+        @('RUNTIME', '3/5', '补齐开发工具'),
+        @('SERVICES', '4/5', '检查配置和服务'),
         @('VERIFY', '5/5', '检查'),
         @('READY_SOFTWARE', '', '软件渲染'),
         @('READY_GPU', '', '硬件加速'),
@@ -200,9 +200,9 @@ Test-Agent 'progress names explain every installation stage and terminal state' 
     $text = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'RUNTIME'; phase = 'RUNTIME' })
     foreach ($tool in @('fnm', 'Node', 'Codex', 'MCP')) { Assert-Agent ($text -match [regex]::Escape($tool)) "runtime task missing: $tool" }
     $interrupted = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'INTERRUPTED'; phase = 'RUNTIME' })
-    Assert-Agent ($interrupted.Contains('安装已中断') -and $interrupted.Contains('安装开发工具')) 'interruption lost its retained original stage'
+    Assert-Agent ($interrupted.Contains('安装已中断') -and $interrupted.Contains('补齐开发工具')) 'interruption lost its retained original stage'
     $failed = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'ERROR'; phase = 'RUNTIME' })
-    Assert-Agent ($failed.Contains('安装失败') -and -not $failed.Contains('安装开发工具')) 'error invented a previous stage that the installer does not retain'
+    Assert-Agent ($failed.Contains('安装失败') -and -not $failed.Contains('补齐开发工具')) 'error invented a previous stage that the installer does not retain'
     $unknown = Get-WslAgentProgressText -Status ([pscustomobject]@{ state = 'FUTURE_STAGE'; phase = 'FUTURE_STAGE' })
     Assert-Agent ($unknown.Contains('未知') -and $unknown.Contains('FUTURE_STAGE')) 'unknown progress was hidden or presented as ready'
 }
@@ -224,7 +224,7 @@ Test-Agent 'polling prints elapsed wait and readable transitions without real sl
         Assert-Agent ($line -match '\[\d{2}:\d{2}:\d{2}\]' -and $line.Contains('fixture-main')) 'elapsed wait or selected distro is unclear'
         Assert-Agent ($line -notmatch 'PACKAGES\s+PACKAGES|RUNTIME\s+RUNTIME') 'polling still prints duplicate phase codes'
     }
-    Assert-Agent ($capture.Lines[1].Contains('安装系统依赖') -and $capture.Lines[2].Contains('安装开发工具')) 'reported phase transitions remain untranslated'
+    Assert-Agent ($capture.Lines[1].Contains('补齐系统依赖') -and $capture.Lines[2].Contains('补齐开发工具')) 'reported phase transitions remain untranslated'
 }
 Test-Agent 'translated failures preserve diagnostics and unknown states cannot finish installation' {
     function Write-Host { param($Object, $ForegroundColor) }
@@ -235,8 +235,8 @@ Test-Agent 'translated failures preserve diagnostics and unknown states cannot f
         try { Wait-WslAgentInstall -Distro fixture-main } catch { $failure = $_.Exception.Message }
         Assert-Agent ($failure -and $failure -notmatch 'unexpected sleep') 'stopped or unknown state was treated as completed'
         if ($code -ne 'FUTURE_STAGE') {
-            Assert-Agent ($failure.Contains('fixture download failed') -and $failure.Contains('/var/lib/onedebian-agent/install.log') -and $failure.Contains('Resume')) 'failure translation lost the original diagnostic, log path or recovery action'
-            Assert-Agent ($failure -match '继续安装|恢复') 'recovery guidance remains English only'
+            Assert-Agent ($failure.Contains('fixture download failed') -and $failure.Contains('/var/lib/onedebian-agent/install.log') -and $failure.Contains('Install')) 'failure translation lost the original diagnostic, log path or recovery action'
+            Assert-Agent ($failure -match '再次安装|检查补齐') 'recovery guidance remains English only'
         }
     }
 }
