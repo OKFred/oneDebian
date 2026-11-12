@@ -260,6 +260,9 @@ def chromium_command(config):
             '--no-default-browser-check', '--restore-last-session',
             '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding']
+    if gpu_backend(config) == 'd3d12':
+        # CPU rasterization avoids D3D12 page/tab corruption while keeping GPU compositing and WebGL.
+        command.append('--disable-gpu-rasterization')
     # A new Chrome WebUI tab can have no committed frame and stall CDP attachment.
     return command + (['about:blank'] if not (profile / 'Local State').exists() else [])
 
