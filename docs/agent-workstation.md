@@ -129,7 +129,9 @@ ssh -N -L 127.0.0.1:16080:127.0.0.1:16080 -L 127.0.0.1:18931:127.0.0.1:18931 <�
 
 首次安装仅尝试已有 `/dev/dri/renderD*`，在独立临时 profile 中检查原生 EGL 绘制、WebGL1/2 绘制与 Chromium GPU 进程对应设备文件句柄。失败回到软件桌面，不安装宿主 GPU 驱动、不换内核。仅有 `/dev/dxg` 不能证明该独立桌面支持硬件加速。GPU 验收可再运行 `sudo bash ./agent.sh verify --gpu`；软件模式下该硬件验收应失败，普通浏览器验收仍应通过。
 
-安装任务由 `onedebian-agent-install.service` 执行，退出终端不会取消。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。重新运行不会启动第二个并发任务；中断后使用 Resume，保留已下载文件。
+安装任务由 `onedebian-agent-install.service` 执行，关闭进度窗口不会主动取消后台任务，但 WSL 实例仍需保持运行。已有实例的驻留策略不会自动改变，可在 **07 状态** 中确认。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。重新运行不会启动第二个并发任务；中断后使用 Resume，保留已下载文件。
+
+安装阶段停留较久时，先查看 `install.log` 中的最后几行，区分仍在下载、重试或已经失败。网络、DNS、代理以及上游服务可达性都会影响耗时；国内 APT 源只影响 APT，不能加速 GitHub、Node.js 或 npm 的下载。个别下载有各自的超时和重试，但 APT、fnm 安装 Node 和 npm 安装没有统一覆盖的阶段总超时，不能保证网络异常会在固定时间内结束。
 
 Windows 安装等待界面每 10 秒显示进度，中文说明后用一个简短英文标签概括：
 
@@ -148,5 +150,26 @@ sudo bash /opt/onedebian-agent/agent.sh uninstall --yes
 ```
 
 卸载只移除校验一致的自有服务与文件，修改过的服务须人工检查；保留账号、项目、profile、keyring、安装记录和已安装依赖。APT 源、WSL 设置与后台驻留也保留，按原菜单或备份另行恢复。不会自动注销或删除 WSL。浏览器资料位于 `~/.local/share/onedebian-agent/profile`，接管标记为同目录上一级的 `manual`。
+
+### 撤销 Agent 安装
+
+**09 → 7** 保留原来的轻量卸载行为。若要撤销 **09 → 2 安装到已有 WSL** 新增的工作环境，使用 **09 → 11 撤销 Agent 安装 / Undo**；原生 Debian 在 **14 Agent 环境 → 7**。这不是删除整个发行版，项目、浏览器资料、keyring 和账号登录凭据会保留。
+
+Windows 也可从仓库目录执行：
+
+```powershell
+.\agent-via-wsl.ps1 -Action CleanupPlan -DistroName debian-wsl-main
+.\agent-via-wsl.ps1 -Action Cleanup -DistroName debian-wsl-main
+```
+
+第一条只检查并展示清单，使用仓库中暂存的最新脚本，不覆盖正在使用的已部署组件。第二条也会先显示计划；确认目标后输入完整的 `UNDO debian-wsl-main` 才开始撤销，`-Yes` 和单独输入 `Y` 不能替代这次确认。计划列明删除项、恢复项、保留项和阻止执行的原因，长清单可选择完整展示；Windows 只在确认后停止该实例自己的转发。
+
+后续安装记录安装前状态，撤销时仅处理能确认属于本次安装、且未被后来修改或共享使用的内容。老版本安装缺少基线时，来源不明的软件或设置会保留并明确报告，不能保证回到安装前的完全相同状态。不会使用全局 `autoremove`，也不会执行 `wsl --unregister` 或 `wsl --shutdown`。
+
+安装任务仍运行时会拒绝清理。清理中检测到计划变化、外部依赖或归属不明的内容时，不会跳过检查强删；请按结果中的保留／阻止原因处理。恢复的 WSL 启动设置若需重启生效，由使用者另行安排，只影响所选实例。
+
+另行确认的 WSL 首次启动初始化和 eth0 网络保护会保留，由对应菜单管理。清理失败后，重新选择撤销入口会根据剩余内容生成新计划；Resume 用于恢复安装，会重新安装环境。
+
+清理执行时，原生命令输出保存到仅 root 可读的 `/var/lib/onedebian-agent/cleanup.log`，不混入 JSON 结果；Windows 无论清理完成还是失败都会显示返回的日志路径。排查时可在目标系统运行 `sudo tail -n 80 /var/lib/onedebian-agent/cleanup.log`。计划预览没有执行清理，不代表已经产生该日志。
 
 此环境没有 PVE 宿主级内网隔离，WSL 也不是用于运行不可信代码的强隔离边界。首版不移植 PVE 防火墙、显卡直通或 SLS。

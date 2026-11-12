@@ -133,6 +133,7 @@ function Test-WslAgentPorts {
 
 function Initialize-WslAgentSystemd {
     param([string]$Distro, [string]$Entry, [string]$Mirror = 'keep', [switch]$NewInstance, [switch]$RestartSelected, [switch]$AdoptUser)
+    $null = Invoke-WslAgentCommand -Distro $Distro -Entry $Entry -Command prepare-undo
     $pid1 = (Invoke-WslAgentShell -Distro $Distro -Script 'cat /proc/1/comm').Text.Trim()
     if (-not $NewInstance -and $pid1 -ne 'systemd') {
         if (-not $RestartSelected -and (Read-Host "Enable systemd, suppress its firstboot wizard, and restart only $Distro now? [y/N]") -ne 'Y') {
@@ -195,9 +196,80 @@ function Open-WslAgentDesktop {
     Start-Process -FilePath $access.Address | Out-Null
 }
 
+function Write-WslAgentCleanupItems {
+    param([string]$Label, $Items, [int]$Limit = 20)
+    $values = @($Items | Where-Object { $null -ne $_ } | ForEach-Object {
+        if ($_ -is [string]) { $_; return }
+        $item = $_
+        $parts = @()
+        foreach ($field in @('path', 'package', 'name', 'action', 'reason', 'message')) {
+            $value = if ($item -is [Collections.IDictionary]) { $item[$field] } elseif ($item.PSObject.Properties[$field]) { $item.PSObject.Properties[$field].Value }
+            if ($value) { $parts += [string]$value }
+        }
+        if (-not $parts.Count) { throw '清理计划包含无法展示的条目 / Invalid plan item' }
+        $parts -join ' | '
+    })
+    if (-not $values.Count) { return }
+    Write-Host ("{0} ({1})" -f $Label, $values.Count)
+    $values | Select-Object -First $Limit | ForEach-Object { Write-Host "  $_" }
+    if ($values.Count -gt $Limit) { Write-Host "  …另有 $($values.Count - $Limit) 项 / More" }
+}
+
+function Show-WslAgentCleanupPlan {
+    param($Plan, [string]$Distro, [switch]$Full)
+    $limit = if ($Full) { [int]::MaxValue } else { 20 }
+    Write-Host "`n撤销 Agent 安装 / Undo：$Distro" -ForegroundColor Cyan
+    Write-Host '保留 WSL、原有软件、项目、浏览器资料和登录凭据。归属不明或后来修改的内容会保留。'
+    Write-Host "计划 / Plan：$($Plan.plan_id)"
+    Write-WslAgentCleanupItems '停用系统服务 / System services' $Plan.system_units $limit
+    Write-WslAgentCleanupItems '停用用户服务 / User services' $Plan.user_units $limit
+    Write-WslAgentCleanupItems '删除文件 / Files' $Plan.remove_files $limit
+    Write-WslAgentCleanupItems '删除目录 / Directories' $Plan.remove_trees $limit
+    Write-WslAgentCleanupItems '恢复文件 / Restore' $Plan.restore_files $limit
+    Write-WslAgentCleanupItems '恢复设置 / Settings' $Plan.settings $limit
+    Write-WslAgentCleanupItems '移除软件包 / Packages' $Plan.packages.remove $limit
+    Write-WslAgentCleanupItems '恢复软件包标记 / Package marks' $Plan.packages.restore_auto $limit
+    Write-WslAgentCleanupItems '保留软件包 / Retained packages' $Plan.packages.retained $limit
+    Write-WslAgentCleanupItems '移除新增组权限 / Groups' $Plan.account_changes.remove_groups $limit
+    if ($Plan.account_changes.disable_linger) { Write-Host '恢复 agent 的原有非驻留设置 / Linger' }
+    Write-WslAgentCleanupItems '保留资料 / Preserved' $Plan.preserve $limit
+    Write-WslAgentCleanupItems '保留内容 / Retained' $Plan.retained $limit
+    Write-WslAgentCleanupItems '说明 / Notes' $Plan.warnings ([int]::MaxValue)
+    Write-WslAgentCleanupItems '阻止清理 / Blocked' $Plan.blockers ([int]::MaxValue)
+}
+
+function Invoke-WslAgentCleanup {
+    param([string]$Distro, [switch]$PlanOnly)
+    # Use the repository's staged code without replacing a legacy/live installation just to inspect it.
+    $entry = Send-WslAgentBundle -Distro $Distro
+    $result = Invoke-WslAgentCommand -Distro $Distro -Entry $entry -Command cleanup-plan -Options @('--json') -AllowFailure
+    try { $plan = $result.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw "清理计划无法读取 / Invalid plan：$($result.ErrorText)" }
+    if ($plan.state -ne 'CLEANUP_PLAN' -or [string]$plan.plan_id -cnotmatch '^[a-f0-9]{64}$') { throw '清理计划标识无效，未停止转发 / Invalid plan ID' }
+    Show-WslAgentCleanupPlan -Plan $plan -Distro $Distro
+    if ($result.ExitCode -ne 0 -or $plan.active -or @($plan.blockers | Where-Object { $null -ne $_ }).Count) { throw '当前无法清理，请先处理上述原因 / Blocked' }
+    if ($PlanOnly) { return }
+    if ((Read-Host '显示完整清单？/ Details [y/N]') -eq 'Y') { Show-WslAgentCleanupPlan -Plan $plan -Distro $Distro -Full }
+    $token = "UNDO $Distro"
+    if ((Read-Host "输入 $token 确认撤销此工作机安装 / Confirm") -cne $token) { Write-Host '已取消，未停止转发 / Cancelled'; return }
+    $null = Stop-WslAgentRelay -Distro $Distro
+    $result = Invoke-WslAgentCommand -Distro $Distro -Entry $entry -Command cleanup -Options @('--yes', '--plan-id', [string]$plan.plan_id, '--json') -Timeout 0 -AllowFailure
+    try { $done = $result.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw "清理结果无法读取，转发已停止，请检查安装记录 / Invalid result：$($result.ErrorText)" }
+    $summary = switch ($done.state) {
+        CLEANED { '已撤销 Agent 安装 / Undone' }
+        CLEANED_PARTIAL { '已部分撤销 Agent 安装 / Partial' }
+        default { "清理未完成 / Incomplete：$($done.state)" }
+    }
+    Write-Host $summary
+    if ($done.log) { Write-Host "清理日志 / Log：$($done.log)" }
+    Write-WslAgentCleanupItems '保留内容 / Retained' $done.retained ([int]::MaxValue)
+    Write-WslAgentCleanupItems '说明 / Notes' $done.warnings ([int]::MaxValue)
+    if ($result.ExitCode -ne 0 -or $done.state -notin 'CLEANED', 'CLEANED_PARTIAL') { throw "清理未完成，请查看记录后再操作 / Incomplete：$($done.error)" }
+    if ($done.state -eq 'CLEANED_PARTIAL') { Write-Host '仅撤销了可确认的变更；未确认或修改过的内容仍保留 / Partial' -ForegroundColor Yellow }
+}
+
 function Invoke-WslAgent {
     param(
-        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus')][string]$Action = 'Menu',
+        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup')][string]$Action = 'Menu',
         [string]$DistroName = '', [string]$WslRoot = 'D:\wsl',
         [ValidateSet('keep', 'tuna', 'ustc', 'official')][string]$Mirror = '',
         [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222,
@@ -211,9 +283,11 @@ function Invoke-WslAgent {
         Write-Host '5. 验收 / Verify         6. 打开桌面 / Open desktop'
         Write-Host '7. 卸载工具并保留资料 / Uninstall (keep data)'
         Write-Host '8. 启动本机转发 / Relay start    9. 停止本机转发 / Relay stop'
-        Write-Host '10. 本机转发状态 / Relay status    0. 返回 / Back'
+        Write-Host '10. 本机转发状态 / Relay status'
+        Write-Host '11. 撤销 Agent 安装（保留 WSL 和资料） / Undo'
+        Write-Host '0. 返回 / Back'
         $choice = Read-Host '选择 / Select [1]'
-        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus' }
+        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup' }
         if (-not $choice) { $choice = '1' }
         if ($choice -eq '0') { return }
         if (-not $actions.ContainsKey($choice)) { throw 'Invalid Agent action.' }
@@ -243,6 +317,7 @@ function Invoke-WslAgent {
         Test-WslAgentPorts -Ports @($ViewerPort, $McpPort, $CdpPort)
         $AllowLowResources = Confirm-WslAgentResources -WslRoot $WslRoot -AllowLowResources:$AllowLowResources -Yes:$Yes
     } elseif ($registered -notcontains $DistroName) { throw "WSL distribution is not registered: $DistroName" }
+    if ($Action -in 'CleanupPlan', 'Cleanup') { Invoke-WslAgentCleanup -Distro $DistroName -PlanOnly:($Action -eq 'CleanupPlan'); return }
     if ($Action -eq 'RelayStart') { Write-WslAgentRelayStatus (Start-WslAgentRelay -Distro $DistroName); return }
     if ($Action -eq 'RelayStop') { Write-WslAgentRelayStatus (Stop-WslAgentRelay -Distro $DistroName); return }
     if ($Action -eq 'RelayStatus') { Write-WslAgentRelayStatus (Get-WslAgentRelayStatus -Distro $DistroName); return }
