@@ -39,8 +39,11 @@ cd oneDebian
 - **06. Config (配置向导)**：增量更新全局 `%UserProfile%\.wslconfig` 与单分发 `/etc/wsl.conf`，保留注释和未知配置键，校验输入并显示顺序敏感的 Git Diff。
 - **07. Status (运维诊断)**：以短字段显示实例状态、创建时间近似值、运行时长、磁盘、自启和常驻，并管理登录后自启及空闲退出。
 - **08. Purge (全量环境清理)**：注销选中的发行版，并按范围清理工具箱镜像缓存和导出备份；要求 `Y` + `PURGE` 双重确认。任一注销失败时保留恢复数据。
+- **09. Agent 工作机**：一键创建独立 Debian 13 `ai-dev`，包含 fnm／Node 26、Codex CLI、Chromium、MCP、noVNC 和接管按钮；支持安装到明确选择的已有 WSL2。
 - **L. Language (语言切换)**：支持界面在一键无缝切换 `简体中文` 与 `English`。
 - **0. Exit (退出)**：退出工具箱（可直接按 Enter 回车或输入 0）。
+
+另一台 Windows 电脑先用 **00 预检** 准备好 WSL2，再选 **09 → 1**；没有 D 盘时可选择当前用户目录下的 `wsl`。详见[新电脑部署步骤](docs/agent-workstation.md#在另一台-windows-上部署)。软件环境自动安装，首次凭据库选择与 Codex 授权仍需在该工作机完成，不迁移其他电脑的登录凭据。
 
 #### WSL 配置行为
 
@@ -137,6 +140,7 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 11. **清理未使用的 Linux 镜像缓存**。
 12. **Cockpit 文件浏览器**：在 Cockpit 内安装文件管理组件（Files 或 Navigator）。
 13. **Cockpit SMB 文件共享**：安装 Samba 和 Cockpit File Sharing，在 Cockpit 内管理 SMB 共享。
+14. **Agent 环境**：在现有 Debian 13 上安装独立浏览器工作环境，详见[工作机说明](docs/agent-workstation.md)。
 
 #### Cockpit 文件管理与 SMB
 

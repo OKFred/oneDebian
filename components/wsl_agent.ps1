@@ -267,8 +267,16 @@ function Invoke-WslAgent {
     $AllowLowResources = Confirm-WslAgentResources -Distro $DistroName -AllowLowResources:$AllowLowResources -Yes:$Yes
     Initialize-WslAgentSystemd -Distro $DistroName -Entry $entry -Mirror $Mirror -NewInstance:$new -RestartSelected:$RestartSelected -AdoptUser:$AdoptUser
     if ($new) {
-        $null = Set-WslDistroResidency -DistroName $DistroName -KeepAlive $true
-        if ($Autostart) { $null = Set-WslDistroAutostart -DistroName $DistroName -Enabled $true }
+        $residency = Set-WslDistroResidency -DistroName $DistroName -KeepAlive $true
+        if (-not $residency.Success) {
+            throw "Background residency could not be verified for ${DistroName}: $($residency.Error) The instance and installer were retained; Agent installation has not started. Repair residency in menu 07, then Resume with the original mirror and port options."
+        }
+        if ($Autostart) {
+            $startup = Set-WslDistroAutostart -DistroName $DistroName -Enabled $true
+            if (-not $startup.Success) {
+                throw "Windows sign-in startup could not be verified for ${DistroName}: $($startup.Error) The instance and installer were retained; Agent installation has not started. Repair startup in menu 07, then Resume with the original mirror and port options."
+            }
+        }
     }
     $options = @('--yes', '--json', '--mirror', $Mirror, '--viewer-port', [string]$ViewerPort, '--mcp-port', [string]$McpPort, '--cdp-port', [string]$CdpPort)
     if ($AdoptUser) { $options += '--adopt-user' }

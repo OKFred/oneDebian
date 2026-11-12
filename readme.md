@@ -41,6 +41,8 @@ cd oneDebian
 - **L. Language**: Toggle display language seamlessly between `简体中文` and `English`.
 - **0. Exit**: Exit Toolbox (Direct Enter or type 0).
 
+To deploy the Agent workstation on another Windows PC, prepare WSL2 with **00 Precheck**, then use **09 → 1**. The [deployment guide](docs/agent-workstation.md#在另一台-windows-上部署) includes a single creation command with a configurable disk path. Software installation is automated; each workstation still needs its own first-use keyring choice and Codex authorization. No credentials are transferred from another PC.
+
 #### WSL configuration behavior
 
 - Press Enter or enter `--` to keep the current value. Enter `unset` to remove a key.
@@ -136,6 +138,7 @@ cd $HOME/oneDebian && chmod +x menu.sh && ./menu.sh
 11. **Remove Unused Linux Kernel Images**.
 12. **Cockpit File Browser**: Install file management inside Cockpit (Files or Navigator).
 13. **Cockpit SMB File Sharing**: Install Samba and Cockpit File Sharing to manage SMB shares in Cockpit.
+14. **Agent environment**: Install the isolated browser workstation on an existing Debian 13 system; see the [workstation guide](docs/agent-workstation.md).
 
 #### Cockpit file management and SMB
 
