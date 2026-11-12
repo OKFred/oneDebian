@@ -3,6 +3,7 @@ import hashlib
 import contextlib
 import configparser
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -17,6 +18,7 @@ if sys.platform == 'win32':
     sys.modules.setdefault('pwd',types.SimpleNamespace())
 spec = importlib.util.spec_from_file_location('agent_install',Path(__file__).resolve().parents[1] / 'agent/install.py')
 install = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = install
 spec.loader.exec_module(install)
 
 
@@ -36,6 +38,15 @@ class InstallerTests(unittest.TestCase):
             path = self.base / key.lower(); path.mkdir()
             patch = mock.patch.object(install,key,path); patch.start(); self.patches.append(patch)
             (path / '.owner').write_text(install.OWNER)
+        for module, name in [(install.cleanup, 'prepare'), (install.cleanup, 'reset'),
+                             (install.package_undo, 'prepare'), (install.package_undo, 'finish'),
+                             (install.package_undo, 'reset')]:
+            patch = mock.patch.object(module, name)
+            patch.start(); self.patches.append(patch)
+        patch = mock.patch.object(install.cleanup, 'tracking', side_effect=lambda *_a, **_k: contextlib.nullcontext())
+        patch.start(); self.patches.append(patch)
+        patch = mock.patch.object(install.package_undo, 'install_args', side_effect=lambda _i, argv: argv)
+        patch.start(); self.patches.append(patch)
 
     def tearDown(self):
         for patch in reversed(self.patches):
@@ -100,6 +111,86 @@ class InstallerTests(unittest.TestCase):
              mock.patch.object(install,'owned_directories') as write, mock.patch.object(install,'run') as command:
             self.assertEqual(install.start_install(options()),status)
         write.assert_not_called(); command.assert_not_called()
+
+    def test_timeout_keeps_failure_state_and_original_diagnostic(self):
+        with mock.patch.object(install,'require_root'), mock.patch.object(install,'user_record'), \
+             mock.patch.object(install,'packages',side_effect=install.subprocess.TimeoutExpired('curl',600)), \
+             mock.patch.object(install,'boot_id',return_value='fixture-boot'), \
+             contextlib.redirect_stderr(io.StringIO()) as log:
+            with self.assertRaises(install.subprocess.TimeoutExpired):
+                install.worker(options())
+        result = install.read_json(install.STATE / 'state.json')
+        self.assertEqual(result['state'],'ERROR')
+        self.assertIn('timed out',result['error'])
+        self.assertIn('timed out',log.getvalue())
+
+    def test_package_failure_still_finishes_ownership_recording(self):
+        def command(argv, **kwargs):
+            if 'install' in argv:
+                raise install.subprocess.CalledProcessError(100,argv)
+        with mock.patch.object(install,'run',side_effect=command):
+            with self.assertRaises(install.subprocess.CalledProcessError):
+                install.packages(options())
+        install.package_undo.install_args.assert_called_once()
+        install.package_undo.finish.assert_called_once()
+
+    def test_undo_baseline_precedes_user_and_payload_changes(self):
+        events = []
+        with mock.patch.object(install,'prepare_changes',side_effect=lambda: events.append('baseline') or install), \
+             mock.patch.object(install,'user_record',side_effect=lambda *_:events.append('user')), \
+             mock.patch.object(install,'save_payload',side_effect=lambda:events.append('payload')), \
+             mock.patch.object(install,'Path',side_effect=lambda value:self.base/'wsl.conf' if str(value)=='/etc/wsl.conf' else Path(value)):
+            install.set_wsl_config(options())
+        self.assertEqual(events,['baseline','user','payload'])
+
+    def test_first_wsl_preparation_holds_operation_lock_before_baseline(self):
+        def prepare():
+            self.assertTrue((install.STATE/'install.lock').is_file())
+            with self.assertRaisesRegex(RuntimeError,'cleanup is running'):
+                with install.operation_lock(): pass
+            return install
+        with mock.patch.object(install,'prepare_changes',side_effect=prepare), \
+             mock.patch.object(install,'configure_wsl',return_value={'state':'PREPARED'}):
+            self.assertEqual(install.set_wsl_config(options()),{'state':'PREPARED'})
+
+    def test_cleanup_formatter_never_prints_backup_contents(self):
+        data = dict(state='CLEANUP_PLAN',plan_id='a'*64,restore_files=[
+            dict(path='/home/agent/.bashrc',content='private-backup-must-not-print')])
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            install.show_cleanup(data)
+        self.assertIn('/home/agent/.bashrc',output.getvalue())
+        self.assertIn('plan_id: '+'a'*64,output.getvalue())
+        self.assertNotIn('private-backup-must-not-print',output.getvalue())
+
+    def test_ready_install_cannot_race_an_active_cleanup(self):
+        install.write_json(install.STATE / 'installed.json',{'owner':install.OWNER})
+        with mock.patch.object(install,'require_root'), mock.patch.object(install,'active',return_value=False), \
+             mock.patch.object(install,'status',return_value={'state':'READY_SOFTWARE'}), \
+             mock.patch.object(install,'run') as command:
+            with install.operation_lock():
+                with self.assertRaisesRegex(RuntimeError,'cleanup is running'):
+                    install.start_install(options())
+        command.assert_not_called()
+        with install.operation_lock():
+            pass
+
+    def test_cleanup_json_is_separate_from_native_progress_and_has_private_log(self):
+        def apply(_module, _plan):
+            os.write(1,b'APT removal progress\n')
+            os.write(2,b'Native diagnostic\n')
+            return {'state':'CLEANED'}
+        with mock.patch.object(sys,'argv',['agent.sh','cleanup','--yes','--json','--plan-id','a'*64]), \
+             mock.patch.object(install,'require_root'), \
+             mock.patch.object(install.cleanup,'cleanup_plan',return_value={'plan_id':'a'*64,'blockers':[]}), \
+             mock.patch.object(install.cleanup,'cleanup_apply',side_effect=apply), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(install.main(),0)
+        result=json.loads(output.getvalue())
+        self.assertEqual(result['state'],'CLEANED')
+        log=Path(result['log'])
+        self.assertIn('APT removal progress',log.read_text())
+        self.assertIn('Native diagnostic',log.read_text())
+        self.assertEqual(stat.S_IMODE(log.stat().st_mode),0o600)
 
     def test_user_channel_stop_is_bounded_without_changing_browser_lifetime(self):
         account = types.SimpleNamespace(pw_name='agent',pw_dir=str(self.base/'home/agent'),pw_uid=1000,pw_gid=1000)

@@ -147,15 +147,15 @@ Test-Agent 'new systemd startup protects WSL networking before the restart' {
     function Invoke-WslAgentShell { $state.Reads++; New-AgentResult $(if($state.Reads -gt 1){'systemd'}else{'init'}) }
     function Get-WslNetworkState { [pscustomobject]@{ Known = $true; Risk = $true; RepairSupported = $true; HasIPv4 = $true; HasDefaultRoute = $true } }
     function Repair-WslEth0Management { $state.Calls += 'network'; [pscustomobject]@{ Success = $true } }
-    function Invoke-WslAgentCommand { $state.Calls += 'prepare'; New-AgentResult }
+    function Invoke-WslAgentCommand { param($Command) $state.Calls += $(if ($Command -eq 'prepare-undo') { 'capture' } else { 'prepare' }); New-AgentResult }
     function Invoke-WslCommand { param($Arguments) $state.Calls += ($Arguments -join '|'); New-AgentResult }
     Initialize-WslAgentSystemd -Distro ai-dev -Entry /source/agent.sh -NewInstance
-    Assert-Agent (($state.Calls -join ',') -ceq 'network,prepare,--terminate|ai-dev') 'WSL network ownership was not protected before systemd boot'
+    Assert-Agent (($state.Calls -join ',') -ceq 'capture,network,prepare,--terminate|ai-dev') 'undo baseline or WSL network protection was not captured before systemd boot'
 }
 Test-Agent 'unknown networking blocks a new systemd restart' {
     function Invoke-WslAgentShell { New-AgentResult 'init' }
     function Get-WslNetworkState { [pscustomobject]@{ Known = $false } }
-    function Invoke-WslAgentCommand { throw 'unexpected prepare' }
+    function Invoke-WslAgentCommand { param($Command) if ($Command -eq 'prepare-undo') { New-AgentResult } else { throw 'unexpected prepare' } }
     function Invoke-WslCommand { throw 'unexpected restart' }
     $failed = $false
     try { Initialize-WslAgentSystemd -Distro ai-dev -Entry /source/agent.sh -NewInstance } catch { $failed = $_.Exception.Message.Contains('Cannot verify WSL network') }

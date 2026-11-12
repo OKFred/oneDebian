@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
 import zipfile
 
@@ -25,6 +26,9 @@ STATE = Path('/var/lib/onedebian-agent')
 JOB = 'onedebian-agent-install.service'
 OWNER = 'oneDebian-agent-v1'
 SOURCE = Path(__file__).resolve().parent
+sys.path.insert(0, str(SOURCE))
+import cleanup
+import package_undo
 VERSIONS = dict(node='v26.13.0', fnm='v1.39.0', mcp='0.0.83', codex='0.166.0')
 FNM = {
     'amd64': ('fnm-linux.zip', '7807664f39d39fc518da1c35ba0181e4b3267603c4b1dedeb4b5fc6ae440a224'),
@@ -134,6 +138,19 @@ def owned_directories():
         atomic(marker, OWNER)
 
 
+def prepare_changes():
+    """Capture before the first change, retaining the original baseline across Resume."""
+    owned_directories()
+    installer = sys.modules[__name__]
+    if (STATE / 'cleanup-completed.json').exists():
+        cleanup.validate_reset(installer)
+        package_undo.reset(installer)
+        cleanup.reset(installer)
+    package_undo.prepare(installer)
+    cleanup.prepare(installer)
+    return installer
+
+
 def user_record(adopt=False):
     try:
         user = pwd.getpwnam('agent')
@@ -221,6 +238,13 @@ def set_wsl_config(options):
     require_root()
     require_debian()
     owned_directories()
+    with operation_lock():
+        installer = prepare_changes()
+        with cleanup.tracking(installer):
+            return configure_wsl(options)
+
+
+def configure_wsl(options):
     user_record(options.adopt_user)
     save_payload()
     path = Path('/etc/wsl.conf')
@@ -292,8 +316,14 @@ def packages(options):
         run(['bash', '-c', 'source "$1"; the_localize_apt_sources Debian trixie /etc/apt "$2"', '--', helper, options.mirror])
     env = dict(os.environ, DEBIAN_FRONTEND='noninteractive', APT_LISTCHANGES_FRONTEND='none')
     run(['apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], env=env)
-    run(['apt-get', 'install', '-y', '--no-install-recommends', '-o', 'Dpkg::Options::=--force-confdef',
-         '-o', 'Dpkg::Options::=--force-confold', *PACKAGES], env=env)
+    installer = sys.modules[__name__]
+    package_undo.prepare(installer)
+    command = ['apt-get', 'install', '-y', '--no-install-recommends', '-o', 'Dpkg::Options::=--force-confdef',
+               '-o', 'Dpkg::Options::=--force-confold', *PACKAGES]
+    try:
+        run(package_undo.install_args(installer, command), env=env)
+    finally:
+        package_undo.finish(installer)
 
 
 def install_runtime(user):
@@ -452,22 +482,26 @@ def worker(options):
     require_root()
     import fcntl
     with (STATE / 'install.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             user = user_record(options.adopt_user)
             phase('PACKAGES')
-            packages(options)
+            installer = sys.modules[__name__]
+            with cleanup.tracking(installer):
+                packages(options)
             phase('RUNTIME')
-            install_runtime(user)
+            with cleanup.tracking(installer):
+                install_runtime(user)
             phase('SERVICES')
-            services(user)
-            config = read_json(ETC / 'config.json')
-            if not read_json(STATE / 'installed.json') and not read_json(STATE / 'gpu.json'):
-                verify_gpu(config, user)
-            start_desktop()
-            user_ctl(user, 'start', 'onedebian-agent-novnc.service')
-            if not (Path(user.pw_dir) / '.local/share/onedebian-agent/manual').exists():
-                user_ctl(user, 'start', 'onedebian-agent-mcp.service')
+            with cleanup.tracking(installer):
+                services(user)
+                config = read_json(ETC / 'config.json')
+                if not read_json(STATE / 'installed.json') and not read_json(STATE / 'gpu.json'):
+                    verify_gpu(config, user)
+                start_desktop()
+                user_ctl(user, 'start', 'onedebian-agent-novnc.service')
+                if not (Path(user.pw_dir) / '.local/share/onedebian-agent/manual').exists():
+                    user_ctl(user, 'start', 'onedebian-agent-mcp.service')
             phase('VERIFY')
             result = subprocess.run(['python3', str(ROOT / 'verify.py'), '--json'], capture_output=True, text=True, check=False)
             try:
@@ -485,11 +519,32 @@ def worker(options):
             raise
 
 
+@contextlib.contextmanager
+def operation_lock(create=True):
+    import fcntl
+    path = STATE / 'install.lock'
+    if path.is_symlink(): raise RuntimeError('Untrusted Agent operation lock')
+    if not create and not path.exists():
+        yield
+        return
+    descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT if create else 0), 0o600)
+    with os.fdopen(descriptor, 'r+') as lock:
+        info = os.fstat(lock.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise RuntimeError('Untrusted Agent operation lock')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError('Another Agent installation or cleanup is running; wait before retrying') from None
+        yield
+
+
 def start_install(options):
     require_root()
     if active(): return status()
     if read_json(STATE / 'installed.json') and status()['state'].startswith('READY_'):
-        return status()
+        with operation_lock(create=False):
+            return status()
     report = plan(options)
     if not report['systemd']:
         raise RuntimeError('PID 1 is not systemd. Enable it and restart only this WSL instance before installation.')
@@ -502,22 +557,26 @@ def start_install(options):
         for port in ports:
             if not port_free(port): raise RuntimeError(f'Port {port} is occupied; choose another port explicitly')
     owned_directories()
-    user_record(options.adopt_user)
-    save_payload()
-    if not current: write_json(ETC / 'config.json', config_for(options))
-    phase('PRECHECK')
-    state = read_json(STATE / 'state.json')
-    state.update(mirror=options.mirror, allow_low_resources=options.allow_low_resources)
-    write_json(STATE / 'state.json', state)
-    args = [sys.executable, str(ROOT / 'install.py'), '_run', '--mirror', options.mirror]
-    if options.adopt_user: args.append('--adopt-user')
-    import shlex
-    content = f'[Unit]\nDescription=oneDebian Agent installation\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart={" ".join(shlex.quote(x) for x in args)}\nStandardOutput=append:{STATE}/install.log\nStandardError=append:{STATE}/install.log\nTimeoutStartSec=infinity\n'
-    owned_file(Path('/etc/systemd/system') / JOB, content)
-    run(['systemctl', 'daemon-reload'])
-    if subprocess.run(['systemctl', 'is-failed', '--quiet', JOB], check=False).returncode == 0:
-        run(['systemctl', 'reset-failed', JOB], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    run(['systemctl', 'start', '--no-block', JOB])
+    with operation_lock():
+        if active(): return status()
+        installer = prepare_changes()
+        with cleanup.tracking(installer):
+            user_record(options.adopt_user)
+            save_payload()
+            if not current: write_json(ETC / 'config.json', config_for(options))
+        phase('PRECHECK')
+        state = read_json(STATE / 'state.json')
+        state.update(mirror=options.mirror, allow_low_resources=options.allow_low_resources)
+        write_json(STATE / 'state.json', state)
+        args = [sys.executable, str(ROOT / 'install.py'), '_run', '--mirror', options.mirror]
+        if options.adopt_user: args.append('--adopt-user')
+        import shlex
+        content = f'[Unit]\nDescription=oneDebian Agent installation\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart={" ".join(shlex.quote(x) for x in args)}\nStandardOutput=append:{STATE}/install.log\nStandardError=append:{STATE}/install.log\nTimeoutStartSec=infinity\n'
+        owned_file(Path('/etc/systemd/system') / JOB, content)
+        run(['systemctl', 'daemon-reload'])
+        if subprocess.run(['systemctl', 'is-failed', '--quiet', JOB], check=False).returncode == 0:
+            run(['systemctl', 'reset-failed', JOB], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run(['systemctl', 'start', '--no-block', JOB])
     return wait_install() if options.wait else status()
 
 
@@ -568,9 +627,56 @@ def uninstall(options):
                 note='User, packages, APT sources, WSL config and residency are retained; review them separately.')
 
 
+def show_cleanup(data):
+    print('撤销预览 / Undo' if data['state'] == 'CLEANUP_PLAN' else '撤销结果 / Result')
+    for key, label in [('system_units', '系统服务 / Services'), ('user_units', '用户服务 / Services'),
+                       ('remove_files', '删除文件 / Remove'), ('restore_files', '恢复设置 / Restore')]:
+        values = data.get(key, [])
+        print(f'{label}: {len(values)}')
+        for item in values[:20]:
+            print('  ' + (str(item.get('path', '')) if isinstance(item, dict) else str(item)))
+        if len(values) > 20: print(f'  … {len(values)} 项，完整清单使用 --json / Details')
+    packages = data.get('packages', {})
+    print('删除软件包 / Packages: ' + (', '.join(packages.get('remove', [])) or '无 / None'))
+    print('恢复自动安装标记 / Marks: ' + (', '.join(packages.get('restore_auto', [])) or '无 / None'))
+    for key, label in [('preserve', '保留资料 / Keep'), ('retained', '保留项目 / Retained'),
+                       ('warnings', '注意 / Notice'), ('blockers', '阻止清理 / Blocked')]:
+        for item in data.get(key, []):
+            if isinstance(item, dict): item = str(item.get('path', item.get('name', ''))) + ': ' + str(item.get('reason', ''))
+            print(label + ': ' + str(item))
+    for key, value in data.get('account_changes', {}).items(): print('账号设置 / Account: ' + key + ': ' + str(value))
+    if 'plan_id' in data: print('plan_id: ' + data['plan_id'])
+    if 'log' in data: print('日志 / Log: ' + data['log'])
+
+
+@contextlib.contextmanager
+def cleanup_output():
+    """Keep subprocess output out of the JSON protocol and retain failure details."""
+    path = STATE / 'cleanup.log'
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o077:
+        os.close(descriptor)
+        raise RuntimeError('Untrusted cleanup log')
+    sys.stdout.flush(); sys.stderr.flush()
+    saved = [os.dup(1), os.dup(2)]
+    try:
+        os.dup2(descriptor, 1); os.dup2(descriptor, 2)
+        print(f'Agent undo started at {int(time.time())}', file=sys.stderr, flush=True)
+        yield path
+    except Exception:
+        traceback.print_exc()
+        raise
+    finally:
+        sys.stdout.flush(); sys.stderr.flush()
+        os.dup2(saved[0], 1); os.dup2(saved[1], 2)
+        for number in [descriptor, *saved]: os.close(number)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan', 'prepare-wsl', 'install', 'resume', 'status', 'verify', 'uninstall', '_run'])
+    parser.add_argument('action', choices=['plan', 'prepare-undo', 'prepare-wsl', 'install', 'resume', 'status', 'verify', 'uninstall', 'cleanup-plan', 'cleanup', '_run'])
+    parser.add_argument('--plan-id')
     parser.add_argument('--mirror', choices=['keep', 'tuna', 'ustc', 'official'], default='keep')
     for option, default in [('viewer', 16080), ('mcp', 18931), ('cdp', 19222)]:
         parser.add_argument('--' + option + '-port', type=int, default=default)
@@ -586,14 +692,32 @@ def main():
         if not 1024 <= port <= 65535: parser.error('Ports must be between 1024 and 65535')
     try:
         if options.action == 'plan': data = plan(options)
+        elif options.action == 'prepare-undo':
+            require_root(); require_debian()
+            if active(): raise RuntimeError('Installation is active; use Resume to observe its existing job')
+            owned_directories()
+            with operation_lock(): prepare_changes()
+            data = dict(state='UNDO_RECORDED')
         elif options.action == 'prepare-wsl': data = set_wsl_config(options)
         elif options.action in ('install', 'resume'): data = start_install(options)
         elif options.action == 'status': data = status()
         elif options.action == '_run': worker(options); return 0
         elif options.action == 'verify':
             return subprocess.call([sys.executable, str(ROOT / 'verify.py'), *( ['--json'] if options.json else []), *extra])
+        elif options.action == 'cleanup-plan': data = cleanup.cleanup_plan(sys.modules[__name__])
+        elif options.action == 'cleanup':
+            require_root()
+            if not options.yes: raise RuntimeError('Cleanup requires --yes and the exact preview --plan-id; WSL and user data remain')
+            if not options.plan_id or not re.fullmatch(r'[a-f0-9]{64}', options.plan_id): raise RuntimeError('Preview cleanup-plan and supply its exact --plan-id')
+            preview = cleanup.cleanup_plan(sys.modules[__name__])
+            if preview.get('plan_id') != options.plan_id or preview.get('blockers'):
+                raise RuntimeError('Cleanup plan changed or is blocked; preview and confirm it again')
+            with cleanup_output() as logfile:
+                data = cleanup.cleanup_apply(sys.modules[__name__], options.plan_id)
+            data['log'] = str(logfile)
         else: data = uninstall(options)
         if options.json: print(json.dumps(data, ensure_ascii=False))
+        elif options.action in ('cleanup-plan', 'cleanup'): show_cleanup(data)
         else:
             def show(values, prefix=''):
                 for key, value in values.items():
@@ -605,7 +729,10 @@ def main():
             show(data)
         return 1 if data.get('state') in ('ERROR', 'INTERRUPTED') else 0
     except Exception as exc:
-        if options.json: print(json.dumps(dict(state='ERROR', error=str(exc)), ensure_ascii=False))
+        if options.json:
+            error = dict(state='ERROR', error=str(exc))
+            if options.action == 'cleanup': error['log'] = str(STATE / 'cleanup.log')
+            print(json.dumps(error, ensure_ascii=False))
         else: print(f'oneDebian Agent: {exc}', file=sys.stderr)
         return 1
 
