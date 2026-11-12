@@ -361,10 +361,11 @@ function Invoke-WslAgent {
             $root = Read-Host "安装根目录 / WSL root [$WslRoot]"; if ($root) { $WslRoot = $root }
         } else { $DistroName = Select-WslDistro; if (-not $DistroName) { return } }
         if ($Action -eq 'Create') {
-            $defaultMirror = if ($Action -eq 'Create') { 'tuna' } else { 'keep' }
-            $selection = Read-Host "客机 APT 源 / Guest mirror: keep / tuna / ustc / official [$defaultMirror]"
-            $Mirror = if ($selection) { $selection.Trim() } else { $defaultMirror }
-            if ($Mirror -notin 'keep', 'tuna', 'ustc', 'official') { throw 'Invalid APT mirror.' }
+            $defaultMirror = if ($Mirror) { $Mirror } else { 'tuna' }
+            $selection = ([string](Read-Host "客机 APT 源 / Guest mirror: keep / tuna / ustc / official [$defaultMirror]")).Trim()
+            if (-not $selection) { $selection = $defaultMirror }
+            if ($selection -notin 'keep', 'tuna', 'ustc', 'official') { throw 'Invalid APT mirror.' }
+            $Mirror = $selection
             foreach ($setting in @(@('ViewerPort', 'noVNC', $ViewerPort), @('McpPort', 'MCP', $McpPort), @('CdpPort', 'CDP', $CdpPort))) {
                 $value = Read-Host "$($setting[1]) 端口 / port [$($setting[2])]"
                 if ($value) { Set-Variable -Name $setting[0] -Value ([int]$value) }
@@ -462,9 +463,12 @@ function Invoke-WslAgent {
         $McpPort = [int]$preparation.config.mcp_port
         $CdpPort = [int]$preparation.config.cdp_port
     } elseif ($interactiveMenu -and -not $new) {
-        $selection = Read-Host '客机 APT 源 / Guest mirror: keep / tuna / ustc / official [keep]'
-        $Mirror = if ($selection) { $selection.Trim() } else { '' }
-        if ($Mirror -and $Mirror -notin 'keep', 'tuna', 'ustc', 'official') { throw 'Invalid APT mirror.' }
+        $defaultMirror = if ($Mirror) { $Mirror } elseif (-not $preparation.completed -and $preparation.state.mirror) { [string]$preparation.state.mirror } else { 'keep' }
+        $selection = ([string](Read-Host "客机 APT 源 / Guest mirror: keep / tuna / ustc / official [$defaultMirror]")).Trim()
+        if ($selection) {
+            if ($selection -notin 'keep', 'tuna', 'ustc', 'official') { throw 'Invalid APT mirror.' }
+            $Mirror = $selection
+        }
         foreach ($setting in @(@('ViewerPort', 'noVNC', $ViewerPort), @('McpPort', 'MCP', $McpPort), @('CdpPort', 'CDP', $CdpPort))) {
             $value = Read-Host "$($setting[1]) 端口 / port [$($setting[2])]"
             if ($value) { Set-Variable -Name $setting[0] -Value ([int]$value) }

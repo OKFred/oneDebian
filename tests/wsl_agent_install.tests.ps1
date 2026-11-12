@@ -13,15 +13,17 @@ function Test-Install { param([string]$Name,[scriptblock]$Body)
 function New-InstallResult { param([string]$Text='') [pscustomobject]@{Text=$Text;ErrorText='';ExitCode=0;IsDecoded=$true} }
 function Invoke-InstallFixture {
     param($Preparation,[hashtable]$Extra=@{},[string[]]$Answers=@())
-    $capture=[pscustomobject]@{Events=(New-Object 'System.Collections.Generic.List[string]');Options=@();Access=@{};Lines=(New-Object 'System.Collections.Generic.List[string]');Answers=(New-Object 'System.Collections.Generic.Queue[string]')}
+    $capture=[pscustomobject]@{Events=(New-Object 'System.Collections.Generic.List[string]');Options=@();Access=@{};Lines=(New-Object 'System.Collections.Generic.List[string]');Prompts=(New-Object 'System.Collections.Generic.List[string]');Answers=(New-Object 'System.Collections.Generic.Queue[string]')}
     foreach($answer in $Answers){$capture.Answers.Enqueue($answer)}
     function Get-WslDistros { @('ai-dev','original-a','original-b','original-c','original-d') }
+    function Select-WslDistro { 'ai-dev' }
     function Get-WslDistroVersions { [pscustomobject]@{Distributions=@([pscustomobject]@{Name='ai-dev';Version=2})} }
     function Get-WslAgentPreparation { $Preparation }
     function Write-Host { param($Object,$ForegroundColor) $capture.Lines.Add([string]$Object) }
-    function Read-Host { param($Prompt) $capture.Events.Add('confirm'); if(-not $capture.Answers.Count){throw "unexpected prompt: $Prompt"}; $capture.Answers.Dequeue() }
+    function Read-Host { param($Prompt) $capture.Events.Add('confirm'); $capture.Prompts.Add($Prompt); if(-not $capture.Answers.Count){throw "unexpected prompt: $Prompt"}; $capture.Answers.Dequeue() }
     function Send-WslAgentBundle { param($Distro) Assert-Install ($Distro -ceq 'ai-dev') 'wrong stage target'; $capture.Events.Add('stage'); '/fresh/agent.sh' }
     function Confirm-WslAgentResources { $capture.Events.Add('resources'); $false }
+    function Test-WslAgentPorts { }
     function Confirm-WslAgentPreparedSystemd { param($Distro) Assert-Install ($Distro -ceq 'ai-dev') 'wrong systemd target'; $capture.Events.Add('systemd') }
     function Initialize-WslAgentSystemd { $capture.Events.Add('prepare') }
     function Invoke-WslCommand { throw 'unexpected native WSL change' }
@@ -47,6 +49,48 @@ Test-Install 'READY refreshes current payload but preserves ports mirror and hea
     Assert-Install (($capture.Options -join ',') -ceq '--yes,--json') 'READY overrode saved ports or current source'
     Assert-Install (-not $capture.Access.ContainsKey('SshPort')) 'default SSH port overrode a custom registered port'
     Assert-Install (($capture.Lines -join ',').Contains('APT: keep | noVNC 26080 / MCP 28931 / CDP 29222')) 'summary hid preserved config'
+}
+Test-Install 'menu Install accepts Enter and whitespace at the default mirror after uninstall' {
+    $preparation=[pscustomobject]@{prepared=$false;agent_owned=$true;agent_exists=$true;completed=$false;config=$null;state=$null}
+    foreach($answer in @('', '   ')) {
+        $capture=Invoke-InstallFixture $preparation @{Action='Menu'} @('2',$answer,'','','')
+        Assert-Install ($capture.Events -contains 'install') 'blank mirror prevented menu installation'
+        Assert-Install ($capture.Options -notcontains '--mirror') 'default keep became an explicit override'
+        Assert-Install (($capture.Lines -join ',').Contains('APT: keep')) 'blank default source was not shown as keep'
+    }
+}
+Test-Install 'menu blank mirror preserves the interrupted source and existing CLI selection' {
+    $preparation=New-PreparedInstall -State INTERRUPTED -Completed $false
+    $preparation.config=$null
+    $capture=Invoke-InstallFixture $preparation @{Action='Menu'} @('2','  ','','','')
+    Assert-Install ($capture.Options -notcontains '--mirror' -and ($capture.Lines -join ',').Contains('APT: ustc')) 'blank mirror lost saved source inheritance'
+    Assert-Install (($capture.Prompts -join ',').Contains('[ustc]')) 'mirror prompt hid the inherited default'
+    $capture=Invoke-InstallFixture $preparation @{Action='Menu';Mirror='tuna'} @('2','','','','')
+    Assert-Install (($capture.Options -join ',').Contains('--mirror,tuna')) 'Enter erased an explicit CLI mirror'
+}
+Test-Install 'menu explicit keep remains an explicit source selection' {
+    $preparation=New-PreparedInstall -State INTERRUPTED -Completed $false
+    $preparation.config=$null
+    $capture=Invoke-InstallFixture $preparation @{Action='Menu'} @('2',' keep ','','','')
+    Assert-Install (($capture.Options -join ',').Contains('--mirror,keep')) 'explicit keep silently inherited a prior source'
+}
+Test-Install 'invalid nonempty menu mirror is rejected before staging or preparation' {
+    $preparation=[pscustomobject]@{prepared=$false;agent_owned=$true;agent_exists=$true;completed=$false;config=$null;state=$null}
+    $failed=$false
+    try { Invoke-InstallFixture $preparation @{Action='Menu'} @('2','bad-source') } catch { $failed=$_.Exception.Message.Contains('Invalid APT mirror') }
+    Assert-Install $failed 'invalid menu mirror reached staging'
+}
+Test-Install 'Create menu whitespace uses its displayed default and respects a CLI mirror' {
+    foreach($mirror in @('', 'ustc')) {
+        $name='fresh-'+[guid]::NewGuid().ToString('N')
+        $extra=@{Action='Menu';Yes=$false;WslRoot=$env:TEMP}
+        if($mirror){$extra.Mirror=$mirror}
+        $answer=if($mirror){''}else{'   '}
+        $capture=Invoke-InstallFixture $null $extra @('1',$name,'',$answer,'','','','N')
+        $expected=if($mirror){$mirror}else{'tuna'}
+        Assert-Install (($capture.Lines -join ',').Contains("APT: $expected")) 'Create did not retain its displayed mirror default'
+        Assert-Install ($capture.Events -notcontains 'stage' -and $capture.Events -notcontains 'install') 'cancelled Create reached any installation change'
+    }
 }
 Test-Install 'interrupted initial job inherits confirmed source low-resource consent and skips firstboot' {
     $preparation=New-PreparedInstall -State INTERRUPTED -Completed $false
