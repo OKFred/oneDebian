@@ -1,5 +1,7 @@
 """Offline tests never start a desktop, install packages or touch user profiles."""
 from email.message import Message
+import hashlib
+import hmac
 import importlib.util
 import json
 import os
@@ -170,6 +172,19 @@ class ViewerPolicyTests(unittest.TestCase):
         other = runtime.ViewerPolicy(16081, 'b' * 43)
         self.assertNotEqual(self.policy.cookie_name, other.cookie_name)
         self.assertFalse(other.authenticated(headers(('Cookie', self.policy.cookie_name + '=' + self.policy.session))))
+
+    def test_backend_identity_proves_secret_without_sending_or_revealing_it(self):
+        nonce = '0' * 64
+        proof = self.policy.identity(nonce)
+        message = f'oneDebian-viewer-v1\n16080\n{nonce}'.encode('ascii')
+        self.assertEqual(proof, dict(nonce=nonce, proof=hmac.new(self.policy.token.encode('ascii'), message, hashlib.sha256).hexdigest()))
+        self.assertNotIn(self.policy.token, json.dumps(proof))
+        self.assertNotEqual(proof['proof'], self.policy.identity('1' * 64)['proof'])
+        self.assertNotEqual(proof['proof'], runtime.ViewerPolicy(16081, self.policy.token).identity(nonce)['proof'])
+        self.assertNotEqual(proof['proof'], runtime.ViewerPolicy(16080, 'z' * 43).identity(nonce)['proof'])
+        for invalid in ['', '0' * 63, '0' * 65, 'A' * 64, None]:
+            with self.assertRaises(ValueError):
+                self.policy.identity(invalid)
 
     def test_viewer_removes_fragment_before_authentication_and_does_not_embed_token(self):
         script = (ROOT / 'agent/viewer/login.js').read_text(encoding='utf-8')

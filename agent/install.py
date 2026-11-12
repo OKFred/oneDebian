@@ -377,7 +377,7 @@ def services(user):
         owned_file(Path('/etc/systemd/system') / f'onedebian-agent-{name}.service', content)
     for name in ('mcp', 'novnc'):
         condition = f'ExecCondition={runtime} mcp-permitted\n' if name == 'mcp' else ''
-        content = f'[Unit]\nDescription=oneDebian Agent {name}\n\n[Service]\n{condition}ExecStart={runtime} {name}\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n'
+        content = f'[Unit]\nDescription=oneDebian Agent {name}\n\n[Service]\n{condition}ExecStart={runtime} {name}\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=10\n\n[Install]\nWantedBy=default.target\n'
         owned_file(Path('/etc/systemd/user') / f'onedebian-agent-{name}.service', content)
     desktop_dir = Path(user.pw_dir) / 'Desktop'
     autostart = Path(user.pw_dir) / '.config/autostart'

@@ -56,6 +56,22 @@ Test-Agent 'failed or undecoded native execution cannot report success' {
         Assert-Agent $failed 'command error was swallowed'
     }
 }
+Test-Agent 'null or empty option collections add no argv while a literal empty option is preserved' {
+    $nativeInvoker = (Get-Command Invoke-WslCommand).ScriptBlock
+    function Invoke-WslAgentShell {
+        param($Distro, $Script, $Data, $Timeout, [switch]$AllowFailure)
+        & $nativeInvoker -FilePath 'C:\Program Files\Git\bin\bash.exe' -Arguments (@('--noprofile','--norc','-c','printf "<%s>\n" "$@"','--') + $Data) -TimeoutMilliseconds 10000
+    }
+    foreach ($case in @(
+        [pscustomobject]@{ Options = $null; Expected = "<fixture agent.sh>`n<status>`n" },
+        [pscustomobject]@{ Options = @(); Expected = "<fixture agent.sh>`n<status>`n" },
+        [pscustomobject]@{ Options = @(''); Expected = "<fixture agent.sh>`n<status>`n<>`n" },
+        [pscustomobject]@{ Options = @('--yes'); Expected = "<fixture agent.sh>`n<status>`n<--yes>`n" }
+    )) {
+        $result = Invoke-WslAgentCommand -Distro fixture-only -Entry 'fixture agent.sh' -Command status -Options $case.Options
+        Assert-Agent ($result.ExitCode -eq 0 -and $result.IsDecoded -and $result.Text.Replace("`r`n","`n") -ceq $case.Expected) 'native argv gained or lost an option'
+    }
+}
 Test-Agent 'systemd configuration alone is not runtime proof' {
     $state = [pscustomobject]@{ Reads = 0; Terminations = @() }
     function Invoke-WslAgentCommand { New-AgentResult }

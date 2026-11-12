@@ -1,6 +1,7 @@
 """Installer decisions against disposable files and command stubs only."""
 import hashlib
 import contextlib
+import configparser
 import importlib.util
 import json
 import os
@@ -99,6 +100,22 @@ class InstallerTests(unittest.TestCase):
              mock.patch.object(install,'owned_directories') as write, mock.patch.object(install,'run') as command:
             self.assertEqual(install.start_install(options()),status)
         write.assert_not_called(); command.assert_not_called()
+
+    def test_user_channel_stop_is_bounded_without_changing_browser_lifetime(self):
+        account = types.SimpleNamespace(pw_name='agent',pw_dir=str(self.base/'home/agent'),pw_uid=1000,pw_gid=1000)
+        with mock.patch.object(install,'run'), mock.patch.object(install,'user_ctl'), \
+             mock.patch.object(install,'owned_file') as generated, \
+             mock.patch.object(install,'user_files',return_value=contextlib.nullcontext()):
+            install.services(account)
+        units = {call.args[0].name:call.args[1] for call in generated.call_args_list}
+        for part in ('mcp','novnc'):
+            document = configparser.ConfigParser(interpolation=None)
+            document.read_string(units[f'onedebian-agent-{part}.service'])
+            self.assertEqual(document['Service']['TimeoutStopSec'],'10')
+            self.assertEqual(document['Service'].get('KillMode','control-group'),'control-group')
+            self.assertNotIn('chromium',document['Service']['ExecStart'])
+        for part in ('desktop','chromium'):
+            self.assertIn('TimeoutStopSec=30\n',units[f'onedebian-agent-{part}.service'])
 
     def test_adopting_existing_account_is_explicit(self):
         account = types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000,pw_gid=1000)

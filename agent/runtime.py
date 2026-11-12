@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Ordinary-user processes for the oneDebian private browser desktop."""
 import argparse
+import hashlib
 import hmac
 from http.cookies import CookieError, SimpleCookie
 import json
@@ -14,7 +15,7 @@ import stat
 import subprocess
 import sys
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
 
 ROOT = Path('/opt/onedebian-agent')
@@ -313,11 +314,18 @@ def handoff(config, take):
 
 class ViewerPolicy:
     def __init__(self, port, token):
+        self.port = port
         self.hosts = {f'localhost:{port}', f'127.0.0.1:{port}'}
         self.origins = {'http://' + host for host in self.hosts}
         self.token = token
         self.session = secrets.token_urlsafe(32)
         self.cookie_name = COOKIE + '_' + str(port)
+
+    def identity(self, nonce):
+        if not isinstance(nonce, str) or not re.fullmatch(r'[a-f0-9]{64}', nonce):
+            raise ValueError('Invalid viewer identity nonce')
+        message = f'oneDebian-viewer-v1\n{self.port}\n{nonce}'.encode('ascii')
+        return dict(nonce=nonce, proof=hmac.new(self.token.encode('ascii'), message, hashlib.sha256).hexdigest())
 
     def host_allowed(self, headers):
         values = headers.get_all('Host', [])
@@ -394,7 +402,24 @@ def make_proxy(config, token=None):
             return super().handle_upgrade()
 
         def public_file(self, head=False):
-            name = {'/': 'login.html', '/login.js': 'login.js'}.get(urlsplit(self.path).path)
+            target = urlsplit(self.path)
+            if target.path == '/health':
+                try:
+                    query = parse_qs(target.query, keep_blank_values=True, strict_parsing=True)
+                    if set(query) != {'nonce'} or len(query['nonce']) != 1:
+                        raise ValueError('Expected one identity nonce')
+                    content = json.dumps(self.server.viewer_policy.identity(query['nonce'][0])).encode('ascii')
+                except ValueError:
+                    self.send_error(400, 'Invalid viewer identity challenge')
+                    return True
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                if not head:
+                    self.wfile.write(content)
+                return True
+            name = {'/': 'login.html', '/login.js': 'login.js'}.get(target.path)
             if name is None:
                 return False
             content = (ROOT / 'viewer' / name).read_bytes()

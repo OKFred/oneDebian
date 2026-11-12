@@ -579,8 +579,9 @@ Test-StatusCase 'background launcher quotes literal paths and arguments and supp
 }
 Test-StatusCase 'background launcher waits for its child and propagates exit and launch failures' {
     $powershell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $child=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('Start-Sleep -Milliseconds 300; exit 37'))
-    $arguments=Get-WslLifecycleBackgroundArguments -Executable $powershell -Arguments "-NoProfile -NonInteractive -EncodedCommand $child"
+    # Exercise process waiting without depending on nested PowerShell startup/CLIXML.
+    $child=Join-Path $env:SystemRoot 'System32\cmd.exe'
+    $arguments=Get-WslLifecycleBackgroundArguments -Executable $child -Arguments '/d /c "ping -n 2 127.0.0.1 >nul & exit 37"'
     $watch=[Diagnostics.Stopwatch]::StartNew()
     $result=Invoke-WslCommand -FilePath $powershell -Arguments ($arguments -split ' ') -TimeoutMilliseconds 15000
     Assert-Status ($result.ExitCode -eq 37 -and $watch.ElapsedMilliseconds -ge 300) "launcher detached or lost the child failure (exit $($result.ExitCode), elapsed $($watch.ElapsedMilliseconds)ms): $($result.Text) $($result.ErrorText)"

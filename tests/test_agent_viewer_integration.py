@@ -1,5 +1,8 @@
 """Real websockify boundary test, using only a synthetic Unix-socket backend."""
 import base64
+import hashlib
+import hmac
+import http.client
 from http.cookies import SimpleCookie
 import importlib.util
 import json
@@ -103,6 +106,19 @@ class ViewerBoundaryTests(unittest.TestCase):
 
                 public = request('/')
                 self.assertIn(b' 200 ', public)
+                nonce = '0' * 64
+                challenge = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
+                challenge.request('GET', '/health?nonce=' + nonce)
+                answer = challenge.getresponse()
+                proof = json.loads(answer.read())
+                self.assertEqual(answer.status, 200)
+                self.assertIn("frame-ancestors 'none'", answer.getheader('Content-Security-Policy'))
+                self.assertEqual(proof, dict(nonce=nonce, proof=hmac.new(TOKEN.encode(), f'oneDebian-viewer-v1\n{port}\n{nonce}'.encode(), hashlib.sha256).hexdigest()))
+                self.assertNotIn(TOKEN, json.dumps(proof))
+                challenge.close()
+                for query in ['', '?nonce=x', '?nonce=' + nonce + '&nonce=' + nonce, '?nonce=' + nonce + '&extra=1']:
+                    self.assertIn(b' 400 ', request('/health' + query))
+                self.assertIn(b' 403 ', request('/health?nonce=' + nonce, origins=['https://evil.test']))
                 for target in ['/vnc.html', '/app/ui.js', '/websockify']:
                     header = request(target)
                     self.assertIn(b' 401 ', header)

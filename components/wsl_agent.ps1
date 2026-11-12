@@ -68,6 +68,7 @@ function Send-WslAgentBundle {
 
 function Invoke-WslAgentCommand {
     param([string]$Distro, [string]$Command, [string]$Entry = '/opt/onedebian-agent/agent.sh', [string[]]$Options = @(), [int]$Timeout = 30000, [switch]$AllowFailure)
+    if ($null -eq $Options) { $Options = @() }
     return Invoke-WslAgentShell -Distro $Distro -Script 'set -eu; entry=$1; shift; exec /bin/bash "$entry" "$@"' -Data (@($Entry, $Command) + $Options) -Timeout $Timeout -AllowFailure:$AllowFailure
 }
 
@@ -162,19 +163,15 @@ function Open-WslAgentDesktop {
     $result = Invoke-WslAgentShell -Distro $Distro -Script 'set -eu; exec runuser -u agent -- /usr/bin/python3 /opt/onedebian-agent/runtime.py open-url'
     $address = $result.Text.Trim()
     $uri = $null
-    if (-not [Uri]::TryCreate($address, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or $uri.UserInfo) { throw 'Viewer returned an invalid localhost URL.' }
-    $client = New-Object Net.Sockets.TcpClient
-    try {
-        $connect = $client.ConnectAsync('127.0.0.1', $uri.Port)
-        if (-not $connect.Wait(3000) -or -not $client.Connected) { throw 'Windows localhost cannot reach the viewer. Check Status and WSL localhost forwarding; listeners were not exposed to the LAN.' }
-    } finally { $client.Dispose() }
+    if (-not [Uri]::TryCreate($address, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or $uri.UserInfo -or $uri.Fragment -notmatch '^#token=[A-Za-z0-9_-]{43}$') { throw 'Viewer returned an invalid localhost URL.' }
+    $access = Ensure-WslAgentAccess -Distro $Distro -Address $address
     # The token stays out of console output and persisted Windows configuration.
-    Start-Process -FilePath $address | Out-Null
+    Start-Process -FilePath $access.Address | Out-Null
 }
 
 function Invoke-WslAgent {
     param(
-        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall')][string]$Action = 'Menu',
+        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus')][string]$Action = 'Menu',
         [string]$DistroName = '', [string]$WslRoot = 'D:\wsl',
         [ValidateSet('keep', 'tuna', 'ustc', 'official')][string]$Mirror = '',
         [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222,
@@ -186,9 +183,11 @@ function Invoke-WslAgent {
         Write-Host '2. 安装到指定已有 WSL / Install in selected WSL'
         Write-Host '3. 继续安装 / Resume    4. 状态 / Status'
         Write-Host '5. 验收 / Verify         6. 打开桌面 / Open desktop'
-        Write-Host '7. 卸载工具并保留资料 / Uninstall (keep data)    0. 返回 / Back'
+        Write-Host '7. 卸载工具并保留资料 / Uninstall (keep data)'
+        Write-Host '8. 启动本机转发 / Relay start    9. 停止本机转发 / Relay stop'
+        Write-Host '10. 本机转发状态 / Relay status    0. 返回 / Back'
         $choice = Read-Host '选择 / Select [1]'
-        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall' }
+        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus' }
         if (-not $choice) { $choice = '1' }
         if ($choice -eq '0') { return }
         if (-not $actions.ContainsKey($choice)) { throw 'Invalid Agent action.' }
@@ -218,6 +217,9 @@ function Invoke-WslAgent {
         Test-WslAgentPorts -Ports @($ViewerPort, $McpPort, $CdpPort)
         $AllowLowResources = Confirm-WslAgentResources -WslRoot $WslRoot -AllowLowResources:$AllowLowResources -Yes:$Yes
     } elseif ($registered -notcontains $DistroName) { throw "WSL distribution is not registered: $DistroName" }
+    if ($Action -eq 'RelayStart') { Write-WslAgentRelayStatus (Start-WslAgentRelay -Distro $DistroName); return }
+    if ($Action -eq 'RelayStop') { Write-WslAgentRelayStatus (Stop-WslAgentRelay -Distro $DistroName); return }
+    if ($Action -eq 'RelayStatus') { Write-WslAgentRelayStatus (Get-WslAgentRelayStatus -Distro $DistroName); return }
     if ($Action -eq 'Install') {
         $inventory = Get-WslDistroVersions
         $target = @($inventory.Distributions | Where-Object { $_.Name -eq $DistroName })
@@ -226,6 +228,7 @@ function Invoke-WslAgent {
     if ($Action -eq 'Open') { Open-WslAgentDesktop -Distro $DistroName; return }
     if ($Action -in 'Status', 'Verify', 'Uninstall') {
         if ($Action -eq 'Uninstall' -and -not $Yes -and (Read-Host "Remove oneDebian Agent services from $DistroName, retaining projects/profile/keyring? [y/N]") -ne 'Y') { return }
+        if ($Action -eq 'Uninstall') { $null = Stop-WslAgentRelay -Distro $DistroName }
         $options = if ($Action -eq 'Uninstall') { @('--yes') } else { @() }
         $result = Invoke-WslAgentCommand -Distro $DistroName -Command $Action.ToLowerInvariant() -Options $options -Timeout 0
         Write-Host $result.Text
@@ -240,7 +243,7 @@ function Invoke-WslAgent {
         if ($Mirror) { $resumeOptions += @('--mirror', $Mirror) }
         $result = Invoke-WslAgentCommand -Distro $DistroName -Command resume -Options $resumeOptions -Timeout 0
         Write-Host "已请求继续安装 / Resume requested: $DistroName"
-        if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName }
+        if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName }
         return
     }
     if (-not $Mirror) { $Mirror = if ($new) { 'tuna' } else { 'keep' } }
@@ -250,7 +253,7 @@ function Invoke-WslAgent {
     if (Test-Path -LiteralPath $globalConfig) {
         $content = [IO.File]::ReadAllText($globalConfig)
         if ($content -match '(?ims)^\s*\[wsl2\](?<section>.*?)(?=^\s*\[|\z)' -and $Matches.section -match '(?im)^\s*localhostForwarding\s*=\s*false\s*(?:[;#].*)?$') {
-            Write-Host '【查看入口受限】全局 localhostForwarding=false；Windows 无法直接访问 WSL 回环服务。本工具保留该设置，请先规划 SSH 隧道或另行调整全局设置。' -ForegroundColor Yellow
+            Write-Host '【本机专用转发】全局 localhostForwarding=false；工作机就绪后自动建立专用回环转发，不改全局设置或重启其他 WSL。' -ForegroundColor Yellow
         }
     }
     if ($new) { Write-Host "新建位置: $(Join-Path $WslRoot $DistroName)；启用 systemd、默认 agent、关闭 Windows 磁盘挂载/互操作、保护 WSL 网络，并只重启新实例。" }
@@ -272,6 +275,6 @@ function Invoke-WslAgent {
     if ($AllowLowResources) { $options += '--allow-low-resources' }
     $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command install -Options $options -Timeout 0
     Write-Host "安装任务已提交 / Installation job submitted: $DistroName"
-    if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName }
+    if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName }
     Write-Host "后续 / Next: .\agent-via-wsl.ps1 -Action Status -DistroName $DistroName"
 }
