@@ -107,8 +107,25 @@ class RuntimeTests(unittest.TestCase):
         desktop = runtime.desktop_command(cfg)
         self.assertEqual(desktop[desktop.index('-rendernode') + 1], '')
         self.assertNotIn('/dev/dxg', desktop)
-        self.assertEqual(runtime.chromium_command(cfg), runtime.chromium_command(config()))
+        raster_flag = '--disable-gpu-rasterization'
+        command = runtime.chromium_command(cfg)
+        self.assertEqual(command.count(raster_flag), 1)
+        self.assertEqual([flag for flag in command if flag != raster_flag],
+                         runtime.chromium_command(config()))
         self.assertEqual(runtime.profile_path(cfg), runtime.profile_path(config()))
+        for backend, node in [('software', ''), ('drm', '/dev/dri/renderD129')]:
+            with self.subTest(backend=backend):
+                self.assertNotIn(raster_flag, runtime.chromium_command(
+                    dict(config(), gpu_backend=backend, render_node=node)))
+        with tempfile.TemporaryDirectory() as temporary:
+            probe = Path(temporary) / '.local/share/onedebian-agent/probes/raster-policy'
+            for backend, node in [('d3d12', ''), ('software', ''), ('drm', '/dev/dri/renderD129')]:
+                with self.subTest(probe_backend=backend):
+                    probe_cfg = dict(config(temporary), gpu_backend=backend, render_node=node,
+                                     probe_profile=str(probe))
+                    probe_command = runtime.chromium_command(probe_cfg)
+                    self.assertEqual(probe_command.count(raster_flag), int(backend == 'd3d12'))
+                    self.assertIn('--user-data-dir=' + str(probe), probe_command)
 
     def test_chromium_sandbox_session_restore_and_own_profile(self):
         command = [value.replace('\\', '/') for value in runtime.chromium_command(config())]
