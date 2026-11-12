@@ -81,7 +81,7 @@ the_agent_environment() {
       bash "$entry" ssh --yes --ssh-public-key "$public_key" --ssh-port "${ssh_port:-2222}"
       ;;
     11)
-      printf '更新悬浮控件与 Agent 工作浏览器入口；保留浏览器页面、构建任务和桌面会话。\n'
+      printf '更新悬浮控件，将 Agent 工作浏览器设为首选；保留浏览器页面、构建任务和桌面会话。\n'
       read -r -p '更新桌面控件？/ Apply [y/N]: ' answer
       [[ $answer == [yY] ]] || { printf '已取消 / Cancelled\n'; return 0; }
       bash "$entry" desktop --yes

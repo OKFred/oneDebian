@@ -328,7 +328,7 @@ function Invoke-WslAgent {
     if ($Action -in 'CleanupPlan', 'Cleanup') { Invoke-WslAgentCleanup -Distro $DistroName -PlanOnly:($Action -eq 'CleanupPlan'); return }
     if ($Action -eq 'DesktopUpdate') {
         Write-Host "目标 / Target: $DistroName" -ForegroundColor Cyan
-        Write-Host '更新受管组件、Agent 工作浏览器入口并重新打开悬浮控件；保留浏览器页面和构建任务。' -ForegroundColor Yellow
+        Write-Host '更新受管组件，将 Agent 工作浏览器设为 XFCE 首选并重新打开悬浮控件；保留浏览器页面和构建任务。' -ForegroundColor Yellow
         if (-not $Yes -and (Read-Host '更新桌面控件？/ Apply [y/N]') -ne 'Y') { Write-Host '已取消 / Cancelled'; return }
         $entry = Send-WslAgentBundle -Distro $DistroName
         $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command desktop -Options @('--yes', '--json') -Timeout 0 -AllowFailure

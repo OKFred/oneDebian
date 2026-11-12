@@ -39,6 +39,58 @@ class FocusBrowserTests(unittest.TestCase):
         self.assertEqual(focus.focus_browser(self.config, {}), 'blank')
         self.assertNotIn('Target.createTarget', [call.args[0] for call in self.control.cdp.call_args_list])
 
+    def test_links_create_new_tabs_in_the_verified_browser_and_preserve_existing_pages(self):
+        pages={'old':'https://existing.invalid/work'}
+        active=[]
+        def cdp(method,params):
+            if method=='Target.createTarget':
+                target='new-'+str(len(pages))
+                pages[target]=params['url']
+                return {'targetId':target}
+            if method=='Target.activateTarget':
+                active.append(params['targetId'])
+                return {}
+            raise AssertionError('Existing pages must not be navigated or closed: '+method)
+        self.control.cdp.side_effect=cdp
+        urls=['https://example.invalid/a?literal=$(echo)&q=%22quoted%22','http://[::1]:3000/']
+        self.assertEqual(focus.focus_browser(self.config,{},urls),'new-2')
+        self.control.browser_ready.assert_called_once()
+        self.assertEqual(pages,{'old':'https://existing.invalid/work','new-1':urls[0],'new-2':urls[1]})
+        self.assertEqual(active,['new-2'])
+        self.assertEqual(self.control.method_calls[0],mock.call.browser_ready())
+
+    def test_all_links_are_validated_before_identity_queries_or_any_cdp_action(self):
+        invalid=['javascript:alert(1)','data:text/html,hello','file:///etc/passwd','ftp://example.invalid',
+                 'http:///missing-host','https://','http://[::1','https://example.invalid:70000/',
+                 'chrome://settings','chrome://gpu?query=1','about:config',' https://example.invalid',
+                 'https://example.invalid/has space','https://example.invalid/\npath',
+                 'https://example.invalid/\x00path','https://example.invalid/\x7fpath',None,'']
+        for value in invalid:
+            with self.subTest(value=value), self.assertRaisesRegex(RuntimeError,'HTTP/HTTPS'):
+                focus.focus_browser(self.config,{},['https://valid.invalid',value])
+        focus.Verifier.assert_not_called()
+        self.control.cdp.assert_not_called()
+
+    def test_supported_network_and_diagnostic_urls_remain_literal(self):
+        for url in ['https://example.invalid/path?q=1#part','HTTP://localhost:3000/',
+                    'https://例子.测试/路径','http://[::1]:3000/',
+                    'about:blank','chrome://gpu','chrome://gpu/','chrome://version','chrome://version/']:
+            with self.subTest(url=url): self.assertEqual(focus.browser_url(url),url)
+
+    def test_single_link_and_cli_arguments_use_the_same_verified_browser(self):
+        self.control.cdp.side_effect=[{'targetId':'new'},{}]
+        self.assertEqual(focus.focus_browser(self.config,{},['https://example.invalid']),'new')
+        self.assertEqual(self.control.cdp.call_args_list,[
+            mock.call('Target.createTarget',{'url':'https://example.invalid'}),
+            mock.call('Target.activateTarget',{'targetId':'new'})])
+        with mock.patch.object(focus,'settings',return_value=self.config), \
+             mock.patch.object(focus,'VERSIONS') as versions, \
+             mock.patch.object(focus,'focus_browser') as opener, \
+             mock.patch.object(focus.sys,'argv',['focus-browser.py','https://one.invalid','https://two.invalid']):
+            versions.read_text.return_value='{}'
+            self.assertEqual(focus.main(),0)
+        opener.assert_called_once_with(self.config,{},['https://one.invalid','https://two.invalid'])
+
     def test_no_pages_reports_an_error_without_creating_or_navigating_a_tab(self):
         self.control.cdp.return_value = dict(targetInfos=[])
         with self.assertRaisesRegex(RuntimeError, 'no page to focus'):
@@ -47,11 +99,12 @@ class FocusBrowserTests(unittest.TestCase):
 
     def test_unready_or_wrong_identity_never_issues_a_focus_or_create_command(self):
         for error in ('Chromium service has no main process', 'CDP browser PID differs from the managed Chromium service'):
-            self.control.cdp.reset_mock()
-            self.control.browser_ready.side_effect = RuntimeError(error)
-            with self.subTest(error=error), self.assertRaisesRegex(RuntimeError, error):
-                focus.focus_browser(self.config, {})
-            self.control.cdp.assert_not_called()
+            for urls in ([],['https://example.invalid']):
+                self.control.cdp.reset_mock()
+                self.control.browser_ready.side_effect = RuntimeError(error)
+                with self.subTest(error=error,urls=urls), self.assertRaisesRegex(RuntimeError, error):
+                    focus.focus_browser(self.config, {}, urls)
+                self.control.cdp.assert_not_called()
 
     def test_probe_configuration_is_not_treated_as_the_working_browser(self):
         with self.assertRaisesRegex(RuntimeError, 'GPU probe is active'):
@@ -71,8 +124,11 @@ class FocusBrowserTests(unittest.TestCase):
     def test_launcher_points_to_the_focus_helper(self):
         desktop=(source/'desktop/agent-browser.desktop').read_text()
         self.assertIn('Name=Agent 工作浏览器', desktop)
-        self.assertIn('Exec=/usr/bin/python3 /opt/onedebian-agent/focus-browser.py', desktop)
+        self.assertIn('Exec=/usr/bin/python3 /opt/onedebian-agent/focus-browser.py %u', desktop)
         self.assertIn('Terminal=false', desktop)
+        self.assertIn('MimeType=x-scheme-handler/http;x-scheme-handler/https;', desktop)
+        self.assertIn('Categories=Network;WebBrowser;', desktop)
+        self.assertNotIn('text/html', desktop)
         self.assertNotIn('--user-data-dir', desktop)
 
 

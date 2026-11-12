@@ -308,6 +308,137 @@ def tracking(i, paths=None):
         record(i, paths, observed=before)
 
 
+def _browser_paths():
+    return {_home() / '.config/xfce4/helpers.rc', _home() / '.config/xfce-mimeapps.list'}
+
+
+def _browser_records(data):
+    records = (data or {}).get('browser_defaults', {})
+    if not isinstance(records, dict):
+        raise RuntimeError('Malformed browser-defaults journal')
+    for name, entry in records.items():
+        if Path(name) not in _browser_paths() or not isinstance(entry, dict) or 'before' not in entry or 'after' not in entry:
+            raise RuntimeError('Out-of-scope browser-defaults journal')
+        for key in ('before', 'after', 'previous_after'):
+            value = entry.get(key)
+            if value is None:
+                if key == 'after': raise RuntimeError('Browser-defaults journal has no recorded result')
+                continue
+            if (not isinstance(value, dict) or value.get('kind') != 'file'
+                    or type(value.get('uid')) is not int or value['uid'] <= 0
+                    or type(value.get('gid')) is not int or value['gid'] < 0
+                    or type(value.get('mode')) is not int or not 0 <= value['mode'] <= 0o7777):
+                raise RuntimeError('Unsafe browser-defaults journal')
+            content = base64.b64decode(value.get('content', ''), validate=True)
+            if len(content) > LIMIT or hashlib.sha256(content).hexdigest() != value.get('sha256'):
+                raise RuntimeError('Browser-defaults backup content differs')
+    return records
+
+
+def _browser_after(entry, current):
+    return next((entry[key] for key in ('after', 'previous_after')
+                 if entry.get(key) is not None and _token(current) == _token(entry[key])), None)
+
+
+def set_browser_defaults(i, user, updates):
+    """Journal only the two shared settings before writing as their ordinary owner."""
+    i.require_root(); _trusted(i)
+    if user.pw_uid == 0 or Path(user.pw_dir) != _home():
+        raise RuntimeError('Unexpected Agent account')
+    if not isinstance(updates, dict) or any(Path(path) not in _browser_paths() for path in updates):
+        raise RuntimeError('Browser defaults are outside the fixed settings scope')
+    data = _read(i)
+    if data and data.get('applied'): raise RuntimeError('Reset completed cleanup before changing browser defaults')
+    records = _browser_records(data)
+    pending = {}
+    for name, values in updates.items():
+        path = Path(name)
+        if not isinstance(values, (tuple, list)) or len(values) != 2:
+            raise ValueError('Browser settings require original and replacement text')
+        original, replacement = values
+        if (original is not None and not isinstance(original, str)) or not isinstance(replacement, str):
+            raise ValueError('Browser settings must be text')
+        encoded = replacement.encode('utf-8')
+        if len(encoded) > LIMIT or (original is not None and len(original.encode('utf-8')) > LIMIT):
+            raise RuntimeError('Browser settings are too large')
+        with _user_scope(i, path):
+            current = _fingerprint(path, content=True)
+            if current and (current.get('kind') != 'file' or current['uid'] != user.pw_uid):
+                raise RuntimeError('Browser settings are not an ordinary user-owned file: ' + str(path))
+            if (current is None) != (original is None) or (current is not None and base64.b64decode(current['content']) != original.encode('utf-8')):
+                raise RuntimeError('Browser settings changed before update: ' + str(path))
+            ancestor = path.parent
+            while not ancestor.exists(): ancestor = ancestor.parent
+            parent = ancestor.stat()
+            gid = parent.st_gid if parent.st_mode & stat.S_ISGID else user.pw_gid
+        known = records.get(str(path))
+        if known and _token(current) != _token(known['before']) and _browser_after(known, current) is None:
+            raise RuntimeError('Browser defaults were changed by another user operation: ' + str(path))
+        after = dict(kind='file', mode=current['mode'] if current else 0o600, uid=user.pw_uid, gid=gid,
+                     sha256=hashlib.sha256(encoded).hexdigest(), content=base64.b64encode(encoded).decode('ascii'))
+        entry = dict(before=known['before'] if known else current, after=after)
+        if _token(current) != _token(entry['before']) and _token(current) != _token(after):
+            entry['previous_after'] = current
+        pending[str(path)] = dict(entry=entry, expected=_token(current), text=replacement)
+    if not pending: return
+    if data is None: data = prepare(i)
+    data['browser_defaults'] = dict(records, **{name:value['entry'] for name,value in pending.items()})
+    i.write_json(i.STATE / LEDGER, data, 0o600)
+    for name, value in pending.items():
+        path = Path(name)
+        with _user_scope(i, path):
+            current = _fingerprint(path, content=True)
+            if _token(current) != value['expected']:
+                raise RuntimeError('Browser settings changed during update: ' + name)
+            if _token(current) != _token(value['entry']['after']):
+                i.atomic(path, value['text'], value['entry']['after']['mode'])
+            if _token(_fingerprint(path)) != _token(value['entry']['after']):
+                raise RuntimeError('Browser settings write did not match its journal: ' + name)
+    for value in data['browser_defaults'].values(): value.pop('previous_after', None)
+    i.write_json(i.STATE / LEDGER, data, 0o600)
+
+
+def _restore_file(path, content, mode, uid, gid):
+    temporary = path.with_name(path.name + '.cleanup-' + os.urandom(6).hex())
+    try:
+        with temporary.open('xb') as stream:
+            info = os.fstat(stream.fileno())
+            if info.st_uid != uid or info.st_gid != gid:
+                os.fchown(stream.fileno(), uid if os.geteuid() == 0 else -1, gid)
+            os.fchmod(stream.fileno(), mode)
+            stream.write(content)
+        _parents(path.parent)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def restore_browser_defaults(i):
+    """Preflight all shared settings; leave all of them alone if any need review."""
+    i.require_root(); _trusted(i)
+    records = _browser_records(_read(i))
+    retained, changes = [], []
+    for name, entry in records.items():
+        path = Path(name)
+        try:
+            with _user_scope(i, path): current = _fingerprint(path, content=True)
+            if _token(current) == _token(entry['before']): continue
+            if _browser_after(entry, current) is None:
+                retained.append(name)
+            else: changes.append((path, entry, _token(current)))
+        except (OSError, RuntimeError): retained.append(name)
+    if retained: return retained
+    for path, entry, expected in changes:
+        with _user_scope(i, path):
+            if _token(_fingerprint(path)) != expected:
+                raise RuntimeError('Browser settings changed during restoration: ' + str(path))
+            if entry['before'] is None: path.unlink()
+            else:
+                before = entry['before']
+                _restore_file(path, base64.b64decode(before['content']), before['mode'], before['uid'], before['gid'])
+    return []
+
+
 def validate_reset(i):
     """Validate the completion receipt before either cleanup journal is reset."""
     receipt = i.STATE / 'cleanup-completed.json'
@@ -366,6 +497,10 @@ def _allowed(i, path):
         return True
     home = _home()
     if path in _files(i) or any(path.is_relative_to(tree) for tree in _trees()):
+        return True
+    if path in _browser_paths() or path in {
+            home / '.local/share/applications/agent-browser.desktop',
+            home / '.local/share/xfce4/helpers/agent-browser.desktop'}:
         return True
     units = [BASE / 'etc/systemd/system' / ('onedebian-agent-' + part + '.service')
              for part in ('desktop', 'chromium', 'install', 'ssh')]
@@ -443,6 +578,16 @@ def cleanup_plan(i):
                 changes.update({path: (original.get(path), token) for path, token in after.items()})
             else:
                 changes[name] = (data['before'].get(name), after)
+    for name, entry in _browser_records(data).items():
+        try:
+            with _user_scope(i, Path(name)): current = _fingerprint(Path(name))
+            if _token(current) == _token(entry['before']): continue
+            after = _browser_after(entry, current)
+            if after is None:
+                plan['blockers'].append('Default browser preferences changed; review before removing its helper: ' + name)
+            else: changes[name] = (entry['before'], after)
+        except (OSError, RuntimeError):
+            plan['blockers'].append('Default browser preferences are unsafe; review before removing its helper: ' + name)
     manifest = i.read_json(i.STATE / 'files.json', {})
     for name, digest in manifest.items():
         path = Path(name)
@@ -571,9 +716,10 @@ def cleanup_apply(i, plan_id):
                 current = _fingerprint(path, content=True)
                 if _token(current) != entry['expected']:
                     raise RuntimeError('File changed during cleanup: ' + str(path))
+                browser = _browser_records(data).get(str(path))
                 tree = next((name for name in data['after'] if Path(name) in _trees() and path.is_relative_to(Path(name))), None)
-                before = data['before'][tree][str(path)] if tree else data['before'][str(path)]
-                after = data['after'][tree][str(path)] if tree else data['after'][str(path)]
+                before = browser['before'] if browser else data['before'][tree][str(path)] if tree else data['before'][str(path)]
+                after = _browser_after(browser, current) if browser else data['after'][tree][str(path)] if tree else data['after'][str(path)]
                 if before.get('kind') == 'link':
                     _parents(path.parent)
                     path.unlink()
@@ -583,17 +729,7 @@ def cleanup_apply(i, plan_id):
                            else base64.b64decode(before['content']))
                 if content is None or hashlib.sha256(content).hexdigest() != entry['content_sha256']:
                     raise RuntimeError('Restore content changed: ' + str(path))
-                temporary = path.with_name(path.name + '.cleanup-' + os.urandom(6).hex())
-                try:
-                    with temporary.open('xb') as stream:
-                        os.fchmod(stream.fileno(), entry['mode'])
-                        stream.write(content)
-                    _parents(path.parent)
-                    os.replace(temporary, path)
-                    if not path.is_relative_to(_home()):
-                        os.chown(path, entry['uid'], entry['gid'], follow_symlinks=False)
-                finally:
-                    temporary.unlink(missing_ok=True)
+                _restore_file(path, content, entry['mode'], entry['uid'], entry['gid'])
         for entry in sorted(plan['remove_files'], key=lambda x: len(Path(x['path']).parts), reverse=True):
             path = Path(entry['path'])
             with i.user_files(account) if path.is_relative_to(_home()) else contextlib.nullcontext():

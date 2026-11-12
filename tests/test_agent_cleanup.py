@@ -43,6 +43,17 @@ class CleanupTests(unittest.TestCase):
             path.write_text(json.dumps(value))
             path.chmod(mode)
         self.i.write_json = write_json
+        def atomic(path, text, mode=0o644):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(path.name+'.fixture-new')
+            try:
+                with temporary.open('x') as stream:
+                    os.fchmod(stream.fileno(), mode)
+                    stream.write(text)
+                os.replace(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        self.i.atomic = atomic
         def owned():
             for path in (self.i.ROOT,self.i.ETC,self.i.STATE):
                 path.mkdir(parents=True, exist_ok=True)
@@ -87,6 +98,110 @@ class CleanupTests(unittest.TestCase):
 
     def apply(self):
         return cleanup.cleanup_apply(self.i,self.plan()['plan_id'])
+
+    def test_browser_defaults_keep_other_values_and_original_baseline_across_repeated_updates(self):
+        old_rc='WebBrowser=firefox\r\nTerminalEmulator=my-terminal\r\n'
+        old_mime='[Default Applications]\nimage/png=my-viewer.desktop\n'
+        rc=self.home_file('.config/xfce4/helpers.rc',old_rc); rc.chmod(0o640)
+        mime=self.home_file('.config/xfce-mimeapps.list',old_mime)
+        cleanup.prepare(self.i)
+        changed={rc:(old_rc,old_rc.replace('firefox','agent-browser')),
+                 mime:(old_mime,old_mime+'x-scheme-handler/http=agent-browser.desktop\n')}
+        with mock.patch.object(self.i,'atomic',wraps=self.i.atomic) as writer:
+            cleanup.set_browser_defaults(self.i,self.account,changed)
+        self.assertEqual(writer.call_count,2)
+        first=self.i.read_json(self.i.STATE/cleanup.LEDGER)['browser_defaults']
+        cleanup.set_browser_defaults(self.i,self.account,{path:(text,text) for path,(_old,text) in changed.items()})
+        second=self.i.read_json(self.i.STATE/cleanup.LEDGER)['browser_defaults']
+        self.assertEqual(first,second)
+        self.assertFalse((self.i.STATE/'files.json').exists())
+        for entry in second.values(): self.assertEqual(entry['after']['uid'],1000)
+        public=json.dumps(self.plan())
+        self.assertNotIn(old_rc,public); self.assertNotIn(old_mime,public)
+        self.assertEqual(cleanup.restore_browser_defaults(self.i),[])
+        self.assertEqual(rc.read_bytes(),old_rc.encode()); self.assertEqual(mime.read_text(),old_mime)
+        self.assertEqual(rc.stat().st_mode&0o777,0o640)
+        self.assertEqual(cleanup.restore_browser_defaults(self.i),[])
+
+    def test_new_browser_defaults_are_removed_by_full_cleanup_even_for_a_legacy_installation(self):
+        self.i.write_json(self.i.STATE/'state.json',{'state':'READY_SOFTWARE'})
+        cleanup.prepare(self.i)
+        self.assertTrue(self.i.read_json(self.i.STATE/cleanup.LEDGER)['legacy'])
+        rc=self.home/'.config/xfce4/helpers.rc'; mime=self.home/'.config/xfce-mimeapps.list'
+        cleanup.set_browser_defaults(self.i,self.account,{rc:(None,'WebBrowser=agent-browser\n'),
+            mime:(None,'[Default Applications]\nx-scheme-handler/http=agent-browser.desktop\n')})
+        launcher=self.home_file('.local/share/applications/agent-browser.desktop','fixture owned application')
+        helper=self.home_file('.local/share/xfce4/helpers/agent-browser.desktop','fixture owned helper')
+        self.i.write_json(self.i.STATE/'files.json',{str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in (launcher,helper)})
+        self.assertFalse(self.plan()['blockers'])
+        self.apply()
+        self.assertFalse(any(path.exists() for path in (rc,mime,launcher,helper)))
+
+    def test_modified_browser_preference_blocks_all_restoration_and_full_cleanup(self):
+        rc=self.home_file('.config/xfce4/helpers.rc','WebBrowser=firefox\n')
+        mime=self.home_file('.config/xfce-mimeapps.list','[Default Applications]\nimage/png=viewer.desktop\n')
+        cleanup.prepare(self.i)
+        updates={rc:(rc.read_text(),'WebBrowser=agent-browser\n'),mime:(mime.read_text(),'[Default Applications]\nx-scheme-handler/http=agent-browser.desktop\n')}
+        cleanup.set_browser_defaults(self.i,self.account,updates)
+        rc.write_text('WebBrowser=agent-browser\nTerminalEmulator=user-edited\n')
+        before={path:path.read_bytes() for path in (rc,mime)}
+        ledger=(self.i.STATE/cleanup.LEDGER).read_bytes()
+        self.assertEqual(cleanup.restore_browser_defaults(self.i),[str(rc)])
+        self.assertEqual(before,{path:path.read_bytes() for path in (rc,mime)})
+        self.assertTrue(any('Default browser preferences changed' in error for error in self.plan()['blockers']))
+        with self.assertRaisesRegex(RuntimeError,'Default browser preferences changed'): self.apply()
+        self.assertEqual(self.calls,[])
+        with self.assertRaisesRegex(RuntimeError,'changed by another'):
+            cleanup.set_browser_defaults(self.i,self.account,{rc:(rc.read_text(),'WebBrowser=agent-browser\n')})
+        self.assertEqual((self.i.STATE/cleanup.LEDGER).read_bytes(),ledger)
+
+    def test_browser_default_preflight_rejects_links_foreign_owners_and_mismatched_original_text(self):
+        rc=self.home_file('.config/xfce4/helpers.rc','WebBrowser=firefox\n')
+        mime=self.home/'.config/xfce-mimeapps.list'
+        cleanup.prepare(self.i)
+        ledger=(self.i.STATE/cleanup.LEDGER).read_bytes()
+        secret=self.home_file('outside.txt','fixture must remain')
+        for case in ('link','owner','text','oversize','outside'):
+            with self.subTest(case=case):
+                if mime.exists() or mime.is_symlink(): mime.unlink()
+                if case=='link': mime.symlink_to(secret)
+                if case=='owner': mime.write_text('fixture'); mime.chmod(0o644)
+                target=self.home/'.config/other-file' if case=='outside' else mime
+                original='wrong original' if case=='text' else 'fixture' if case=='owner' else None
+                replacement='x'*(cleanup.LIMIT+1) if case=='oversize' else 'fixture new'
+                with self.assertRaises((RuntimeError,ValueError)):
+                    cleanup.set_browser_defaults(self.i,self.account,{rc:(rc.read_text(),'WebBrowser=agent-browser\n'),target:(original,replacement)})
+                self.assertEqual(rc.read_text(),'WebBrowser=firefox\n')
+                self.assertEqual((self.i.STATE/cleanup.LEDGER).read_bytes(),ledger)
+                self.assertEqual(secret.read_text(),'fixture must remain')
+        if mime.exists(): mime.unlink()
+        directory=self.home/'.config/xfce4'; backup=self.home/'original-config'
+        directory.rename(backup); directory.symlink_to(backup,target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError,'Symlink'):
+            cleanup.set_browser_defaults(self.i,self.account,{rc:('WebBrowser=firefox\n','WebBrowser=agent-browser\n')})
+
+    def test_browser_default_journal_recovers_partial_writes_and_changed_repeat_output(self):
+        rc=self.home_file('.config/xfce4/helpers.rc','WebBrowser=firefox\n')
+        mime=self.home/'.config/xfce-mimeapps.list'
+        cleanup.prepare(self.i)
+        atomic=self.i.atomic
+        def interrupted(path,*args):
+            if path==mime: raise OSError('fixture installation interrupted')
+            atomic(path,*args)
+        updates={rc:('WebBrowser=firefox\n','WebBrowser=agent-browser\n'),mime:(None,'[Default Applications]\n')}
+        with mock.patch.object(self.i,'atomic',side_effect=interrupted):
+            with self.assertRaises(OSError): cleanup.set_browser_defaults(self.i,self.account,updates)
+        self.assertEqual(rc.read_text(),'WebBrowser=agent-browser\n'); self.assertFalse(mime.exists())
+        self.assertFalse(self.plan()['blockers'])
+        cleanup.set_browser_defaults(self.i,self.account,{rc:(rc.read_text(),updates[rc][1]),mime:updates[mime]})
+        with mock.patch.object(self.i,'atomic',side_effect=OSError('fixture repeat interrupted')):
+            with self.assertRaises(OSError):
+                cleanup.set_browser_defaults(self.i,self.account,{rc:(rc.read_text(),'WebBrowser=agent-browser\n# updated helper\n')})
+        journal=self.i.read_json(self.i.STATE/cleanup.LEDGER)['browser_defaults'][str(rc)]
+        self.assertIn('previous_after',journal)
+        self.assertFalse(self.plan()['blockers'])
+        self.assertEqual(cleanup.restore_browser_defaults(self.i),[])
+        self.assertEqual(rc.read_text(),'WebBrowser=firefox\n'); self.assertFalse(mime.exists())
 
     def test_global_ssh_guard_remains_until_ssh_package_removal_is_approved(self):
         path=self.base/'etc/systemd/system/ssh.service.d/90-onedebian-agent.conf'
