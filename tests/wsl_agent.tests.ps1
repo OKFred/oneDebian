@@ -48,6 +48,59 @@ Test-Agent 'existing WSL1 or unverifiable target never starts installation' {
         Assert-Agent $failed 'non-WSL2 target accepted or converted'
     }
 }
+Test-Agent 'new instance lifecycle failures retain the instance and stop before the install job' {
+    $fixture = Join-Path ([IO.Path]::GetTempPath()) ('onedebian-agent-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $fixture
+    $originalProfile = $env:USERPROFILE
+    try {
+        $env:USERPROFILE = $fixture
+        [IO.File]::WriteAllText((Join-Path $fixture 'wsl_agent.ps1'), [IO.File]::ReadAllText("$repo\components\wsl_agent.ps1"), (New-Object Text.UTF8Encoding($true)))
+        [IO.File]::WriteAllText((Join-Path $fixture 'wsl_install.ps1'), @'
+param($Version, $DistroName, $WslRoot, [switch]$AgentImportOnly, [switch]$Confirmed)
+$fixtureState.Imported = $true
+$fixtureState.Registered = @($DistroName)
+'@)
+        . (Join-Path $fixture 'wsl_agent.ps1')
+        function Get-WslDistros { $fixtureState.Registered }
+        function Test-WslAgentPorts { }
+        function Confirm-WslAgentResources { $false }
+        function Send-WslAgentBundle { '/var/tmp/onedebian-agent.ABCDef1234/agent.sh' }
+        function Initialize-WslAgentSystemd { $fixtureState.Prepared = $true }
+        function Set-WslDistroResidency {
+            param($DistroName, $KeepAlive)
+            Assert-Agent ($DistroName -ceq 'fixture-ai-dev' -and $KeepAlive -and $fixtureState.Prepared) 'wrong instance or lifecycle order'
+            [pscustomobject]@{ Success = $case.Residency; Error = 'fixture residency denied' }
+        }
+        function Set-WslDistroAutostart {
+            param($DistroName, $Enabled)
+            Assert-Agent ($DistroName -ceq 'fixture-ai-dev' -and $Enabled) 'wrong startup target'
+            $fixtureState.StartupCalls++
+            [pscustomobject]@{ Success = $case.Startup; Error = 'fixture startup denied' }
+        }
+        function Invoke-WslAgentCommand { $fixtureState.JobCalls++; New-AgentResult }
+        function Wait-WslAgentInstall { throw 'unexpected wait' }
+        function Complete-WslAgentAccess { throw 'unexpected viewer setup' }
+        foreach ($case in @(
+            [pscustomobject]@{ Residency = $false; Startup = $true; Autostart = $true; Error = 'fixture residency denied'; StartupCalls = 0; Jobs = 0 },
+            [pscustomobject]@{ Residency = $true; Startup = $false; Autostart = $true; Error = 'fixture startup denied'; StartupCalls = 1; Jobs = 0 },
+            [pscustomobject]@{ Residency = $true; Startup = $true; Autostart = $true; Error = ''; StartupCalls = 1; Jobs = 1 },
+            [pscustomobject]@{ Residency = $true; Startup = $false; Autostart = $false; Error = ''; StartupCalls = 0; Jobs = 1 }
+        )) {
+            $fixtureState = [pscustomobject]@{ Imported = $false; Registered = @(); Prepared = $false; StartupCalls = 0; JobCalls = 0 }
+            $failure = ''
+            try { Invoke-WslAgent -Action Create -DistroName fixture-ai-dev -WslRoot (Join-Path $fixture 'wsl') -Autostart:$case.Autostart -Yes -NoWait }
+            catch { $failure = $_.Exception.Message }
+            Assert-Agent ($fixtureState.Imported -and $fixtureState.Registered -contains 'fixture-ai-dev') 'failure removed or lost the imported instance'
+            Assert-Agent ($fixtureState.StartupCalls -eq $case.StartupCalls -and $fixtureState.JobCalls -eq $case.Jobs) 'lifecycle failure submitted installation or skipped a verified success'
+            if ($case.Error) {
+                Assert-Agent ($failure.Contains($case.Error) -and $failure.Contains('retained') -and $failure.Contains('menu 07') -and $failure.Contains('Resume')) 'original failure or accurate recovery guidance was lost'
+            } else { Assert-Agent (-not $failure) "verified lifecycle was rejected: $failure" }
+        }
+    } finally {
+        $env:USERPROFILE = $originalProfile
+        Remove-WslAgentBundle -Root $fixture
+    }
+}
 Test-Agent 'failed or undecoded native execution cannot report success' {
     foreach ($value in @((New-AgentResult -Text failure -Code 1), (New-AgentResult -Decoded $false))) {
         function Invoke-WslShellScript { return $value }

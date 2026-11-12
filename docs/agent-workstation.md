@@ -17,6 +17,45 @@
 
 新实例的 rootfs 来自 Linux Containers 镜像服务，经上游 SHA256 校验后导入。它启用 systemd、默认登录 `agent`，关闭 Windows 磁盘自动挂载和程序互操作。只重启新实例，不改变 Windows 默认 WSL 或其他实例。默认启用现有的无窗口后台驻留；登录 Windows 自动启动默认关闭，需要时在原 **07 状态** 菜单开启。
 
+### 在另一台 Windows 上部署
+
+先运行 **00 预检**，确认 WSL2 可用并支持 systemd；尚未启用 Windows 虚拟化／WSL 功能时，需先完成该步骤，可能需要管理员权限和重启 Windows。工作机创建不会自动安装 WSL 本体或重启 Windows。建议所选 WSL 共享资源池有 4 CPU、8 GiB 内存，目标磁盘至少有 32 GiB 空闲空间；工具不会为此修改其他实例的全局限额。
+
+克隆仓库，或下载 ZIP 后解压，再在仓库目录执行：
+
+```powershell
+git clone https://github.com/OKFred/oneDebian.git
+cd oneDebian
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent-via-wsl.ps1 -Action Create -DistroName ai-dev -WslRoot "$env:USERPROFILE\wsl" -Mirror tuna
+```
+
+确认一次后，脚本会下载并校验镜像、导入系统、安装软件、配置服务与后台驻留，并等待就绪。示例安装到当前用户目录的 `wsl\ai-dev`，没有 D 盘也能部署；可替换为其他有写权限的本地磁盘路径。实例名或安装目录已存在时会拒绝创建，保留已有资料。需要能访问镜像服务、Debian 软件源、GitHub、Node.js 和 npm；换用国内 APT 源不代表其他下载也已加速。
+
+安装后打开桌面：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent-via-wsl.ps1 -Action Open -DistroName ai-dev
+```
+
+新电脑仍有两项首次设置：在桌面选择凭据库密码策略，以及用以下命令为这台工作机授权 Codex。空密码需在桌面明确确认未加密存储；本仓库不会复制其他电脑的凭据库设置、网站登录或 Codex 凭据。
+
+```powershell
+wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex login --device-auth
+wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex
+```
+
+因此“一键部署”指软件环境自动安装，首次账号授权和凭据库选择仍由使用者完成。本次 `ai-dev` 的空密码设置是该实例的选择，不会成为其他电脑的默认设置。
+
+基本检查使用 **09 → 5 验收**。完成首次凭据库设置、交还 Codex 后，可再运行完整浏览器验收；它只使用合成页面和 Cookie：
+
+```powershell
+wsl.exe --distribution ai-dev --user root --exec /bin/bash /opt/onedebian-agent/agent.sh verify --browser
+```
+
+若后台驻留或可选的 Windows 登录自启无法验证，创建流程会保留实例和安装器并报告原错误，不会继续提交安装任务。先在 **07 状态** 修复该实例对应策略，再使用 **09 → 3 继续安装**；命令行创建时自定义过镜像源或端口的，继续时也应传入原参数。
+
+实机验收已覆盖 Windows x64 + WSL2 的新 Debian 13 实例：MCP 输入／点击／截图、noVNC 原生键鼠、接管与交还、实例冷启动、页面与合成 Cookie 保留，以及 Codex 登录保留。ARM64 和原生 Debian 共用安装逻辑，但尚未完成各自硬件上的全链路实测；GPU 加速由目标机器验收决定，失败使用软件渲染。
+
 已有系统须显式指定：
 
 ```powershell
