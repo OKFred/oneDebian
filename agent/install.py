@@ -399,6 +399,49 @@ def unit_environment(user):
     return f'User={user.pw_name}\nEnvironment=HOME={user.pw_dir}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{user.pw_uid}\nEnvironment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user.pw_uid}/bus\n'
 
 
+def browser_preference(text, key, value, section=None):
+    """Change one preference without rewriting other applications or comments."""
+    lines = (text or '').splitlines(keepends=True)
+    start = 0
+    if section:
+        headers = [n for n, line in enumerate(lines) if line.strip() == '[' + section + ']']
+        if len(headers) > 1: raise RuntimeError('Duplicate browser preference section')
+        if not headers:
+            return (text or '').rstrip('\n') + ('\n\n' if text else '') + f'[{section}]\n{key}={value}\n'
+        start = headers[0] + 1
+    end = next((n for n in range(start, len(lines)) if lines[n].lstrip().startswith('[')), len(lines))
+    matches = [n for n in range(start, end) if lines[n].split('=', 1)[0].strip() == key and '=' in lines[n]]
+    if len(matches) > 1: raise RuntimeError('Duplicate browser preference: ' + key)
+    if matches: lines[matches[0]] = f'{key}={value}\n'
+    else:
+        if end and not lines[end-1].endswith('\n'): lines[end-1] += '\n'
+        lines.insert(end, f'{key}={value}\n')
+    return ''.join(lines)
+
+
+def default_browser(user):
+    home = Path(user.pw_dir)
+    application = (ROOT / 'desktop/agent-browser.desktop').read_text()
+    helper = (ROOT / 'xfce/agent-browser.desktop').read_text()
+    owned_file(home / '.local/share/applications/agent-browser.desktop', application, user=user)
+    owned_file(home / '.local/share/xfce4/helpers/agent-browser.desktop', helper, user=user)
+    updates = {}
+    for relative in ('.config/xfce4/helpers.rc', '.config/xfce-mimeapps.list'):
+        path = home / relative
+        with user_files(user):
+            if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_size > cleanup.LIMIT)):
+                raise RuntimeError('Unsafe browser preference file: ' + str(path))
+            before = path.read_bytes().decode('utf-8') if path.exists() else None
+        if path.name == 'helpers.rc':
+            after = browser_preference(before, 'WebBrowser', 'agent-browser')
+        else:
+            after = before
+            for scheme in ('http', 'https'):
+                after = browser_preference(after, 'x-scheme-handler/' + scheme, 'agent-browser.desktop', 'Default Applications')
+        updates[path] = (before, after)
+    cleanup.set_browser_defaults(sys.modules[__name__], user, updates)
+
+
 def desktop_launchers(user):
     desktop_dir = Path(user.pw_dir) / 'Desktop'
     autostart = Path(user.pw_dir) / '.config/autostart'
@@ -407,6 +450,7 @@ def desktop_launchers(user):
         owned_file(dest, src.read_text(), 0o755, user=user)
     for folder in (desktop_dir, autostart, autostart.parent):
         with user_files(user): folder.mkdir(parents=True, exist_ok=True)
+    default_browser(user)
 
 
 def services(user):
@@ -801,8 +845,8 @@ def update_desktop(options):
             desktop_launchers(user)
             restarted = restart_controls(config, user)
             return dict(state='DESKTOP_UPDATED', controls_restarted=restarted, log=str(logfile),
-                        reason='Desktop components updated; browser, manual marker and build tasks retained' if restarted
-                        else 'Desktop components updated; controls will start with the next desktop session')
+                        reason='Desktop components and default browser updated; browser, manual marker and build tasks retained' if restarted
+                        else 'Desktop components and default browser updated; controls will start with the next desktop session')
 
 
 def worker(options):
@@ -934,6 +978,8 @@ def uninstall(options):
     units += [Path('/etc/systemd/user') / f'onedebian-agent-{name}.service' for name in ('mcp', 'novnc')]
     if any(path.exists() and not unchanged(path) for path in units):
         raise RuntimeError('A service unit is modified or unowned; review it before uninstalling. No services were stopped.')
+    if cleanup.restore_browser_defaults(sys.modules[__name__]):
+        raise RuntimeError('Default browser preferences changed; review them before uninstalling. No services were stopped.')
     user = pwd.getpwnam('agent')
     for name in ('mcp', 'novnc'):
         subprocess.run(['runuser', '-u', user.pw_name, '--', 'systemctl', '--user', 'disable', '--now', f'onedebian-agent-{name}.service'], env=environment(user), check=False)

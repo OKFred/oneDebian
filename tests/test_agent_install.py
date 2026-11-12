@@ -488,6 +488,7 @@ class InstallerTests(unittest.TestCase):
         account = types.SimpleNamespace(pw_name='agent',pw_dir=str(self.base/'home/agent'),pw_uid=1000,pw_gid=1000)
         with mock.patch.object(install,'run'), mock.patch.object(install,'user_ctl'), \
              mock.patch.object(install,'owned_file') as generated, \
+             mock.patch.object(install,'default_browser'), \
              mock.patch.object(install,'user_files',return_value=contextlib.nullcontext()):
             install.services(account)
         units = {call.args[0].name:call.args[1] for call in generated.call_args_list}
