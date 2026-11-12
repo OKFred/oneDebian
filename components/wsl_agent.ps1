@@ -83,15 +83,41 @@ function Get-WslAgentStatus {
     catch { throw 'Agent status was not valid JSON; the installation state is unknown.' }
 }
 
+function Get-WslAgentProgressText {
+    param($Status)
+    $labels = @{
+        PRECHECK = '[1/5] 准备安装 / Preparing'
+        PACKAGES = '[2/5] 安装系统依赖：桌面、浏览器、中文支持 / Packages'
+        RUNTIME = '[3/5] 安装开发工具：fnm、Node.js、Codex CLI、浏览器 MCP / Runtime'
+        SERVICES = '[4/5] 配置并启动工作环境（含图形检测） / Services'
+        VERIFY = '[5/5] 检查运行时、服务、浏览器和访问入口 / Verification'
+        READY_SOFTWARE = '安装完成，使用软件渲染 / Ready (Software)'
+        READY_GPU = '安装完成，硬件加速已启用 / Ready (GPU)'
+        ERROR = '安装失败 / Failed'
+        INTERRUPTED = '安装已中断 / Interrupted'
+        NOT_INSTALLED = '尚未安装 / Not installed'
+        UNINSTALLED = '已卸载 / Removed'
+    }
+    $message = $labels[[string]$Status.state]
+    if (-not $message) { $message = "未知状态 / Unknown: $($Status.state)" }
+    if ($Status.state -eq 'INTERRUPTED' -and $Status.phase -and $Status.phase -ne $Status.state) {
+        $previous = $labels[[string]$Status.phase]
+        if (-not $previous) { $previous = "未知阶段 / Unknown: $($Status.phase)" }
+        $message += "（中断前：$previous）"
+    }
+    return $message
+}
+
 function Wait-WslAgentInstall {
     param([string]$Distro)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         $status = Get-WslAgentStatus -Distro $Distro
-        Write-Host ("[{0:hh\:mm\:ss}] {1}: {2} {3}" -f $watch.Elapsed, $Distro, $status.state, $status.phase)
+        $progress = Get-WslAgentProgressText -Status $status
+        Write-Host ("[{0:hh\:mm\:ss}] {1}：{2}" -f $watch.Elapsed, $Distro, $progress)
         if ($status.state -in 'READY_SOFTWARE', 'READY_GPU') { return $status }
-        if ($status.state -in 'ERROR', 'INTERRUPTED') { throw "Installation stopped: $($status.error). Log: $($status.log). Use Resume; the distro and data are retained." }
-        if (-not $status.job_active) { throw "Installation job is not running; state is $($status.state). Use Status or Resume. No second job was started." }
+        if ($status.state -in 'ERROR', 'INTERRUPTED') { throw "安装已停止 / Stopped：$($status.error)。日志 / Log：$($status.log)。请使用继续安装 / Resume，实例和资料已保留。" }
+        if (-not $status.job_active) { throw "安装任务未运行 / Not running：$progress。请查看状态或继续安装 / Status / Resume；未启动第二个任务。" }
         Start-Sleep -Seconds 10
     }
 }
