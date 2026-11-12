@@ -161,18 +161,21 @@ Test-Relay 'relay menu actions are scoped and uninstall stops forwarding first' 
     Invoke-WslAgent -Action Uninstall -DistroName ai-dev -Yes
     Assert-Relay (($calls -join ',') -ceq 'start:ai-dev,status:ai-dev,stop:ai-dev,stop:ai-dev,uninstall:ai-dev') 'wrong relay scope or uninstall ordering'
 }
-Test-Relay 'resume waits for readiness before access setup and NoWait defers forwarding' {
+Test-Relay 'legacy Resume stages current Install and waits before access while NoWait defers forwarding' {
     $calls = New-Object 'System.Collections.Generic.List[string]'
     function Get-WslDistros { @('ai-dev') }
-    function Invoke-WslAgentShell { New-RelayResult 'systemd' }
-    function Invoke-WslAgentCommand { $calls.Add('resume'); New-RelayResult }
+    function Get-WslDistroVersions { [pscustomobject]@{ Distributions = @([pscustomobject]@{Name='ai-dev';Version=2}) } }
+    function Get-WslAgentPreparation { [pscustomobject]@{prepared=$true;agent_owned=$true;agent_exists=$true;completed=$true;config=[pscustomobject]@{viewer_port=16080;mcp_port=18931;cdp_port=19222};state=[pscustomobject]@{state='READY_SOFTWARE'}} }
+    function Confirm-WslAgentPreparedSystemd { }
+    function Send-WslAgentBundle { $calls.Add('stage'); '/fresh/agent.sh' }
+    function Invoke-WslAgentCommand { param($Command,$Entry) Assert-Relay ($Command -ceq 'install' -and $Entry -ceq '/fresh/agent.sh') 'legacy alias used old deployed code'; $calls.Add('install'); New-RelayResult }
     function Wait-WslAgentInstall { $calls.Add('wait'); [pscustomobject]@{state='READY_SOFTWARE'} }
     function Complete-WslAgentAccess { $calls.Add('access') }
-    Invoke-WslAgent -Action Resume -DistroName ai-dev -NoWait
-    Assert-Relay (($calls -join ',') -ceq 'resume') 'NoWait started forwarding before readiness'
+    Invoke-WslAgent -Action Resume -DistroName ai-dev -NoWait -Yes
+    Assert-Relay (($calls -join ',') -ceq 'stage,install') 'NoWait started forwarding before readiness'
     $calls.Clear()
-    Invoke-WslAgent -Action Resume -DistroName ai-dev
-    Assert-Relay (($calls -join ',') -ceq 'resume,wait,access') 'viewer access setup ran before installation readiness'
+    Invoke-WslAgent -Action Resume -DistroName ai-dev -Yes
+    Assert-Relay (($calls -join ',') -ceq 'stage,install,wait,access') 'viewer access setup ran before installation readiness'
 }
 Test-Relay 'Open verifies access before opening and does not print the fragment token' {
     $calls = New-Object 'System.Collections.Generic.List[string]'

@@ -112,6 +112,7 @@ class SshTests(unittest.TestCase):
         first=ssh.setup(self.i,PUBLIC+' client',2222)
         private=(self.etc/'ssh_host_ed25519_key').read_bytes()
         self.busy=True
+        before_commands=len(self.commands)
         second=ssh.setup(self.i,PUBLIC+' another comment',2222)
         self.assertEqual(first['host_public_key'],second['host_public_key'])
         self.assertEqual((self.etc/'ssh_host_ed25519_key').read_bytes(),private)
@@ -119,6 +120,8 @@ class SshTests(unittest.TestCase):
         self.assertEqual(first['state'],'SSH_READY')
         self.assertEqual(sum(command[:2]==['ssh-keygen','-q'] for command in self.commands),1)
         self.assertFalse(any(command[:2] in (['apt-get','install'],['systemctl','disable']) for command in self.commands))
+        self.assertFalse(any(command[:2] in (['systemctl','start'],['systemctl','restart'],['systemctl','daemon-reload'])
+                             for command in self.commands[before_commands:]))
 
     def test_public_key_options_private_material_and_multiline_are_rejected_before_changes(self):
         for value in ('-----BEGIN OPENSSH PRIVATE KEY-----','command="whoami" '+PUBLIC,PUBLIC+'\n'+PUBLIC,'ssh-ed25519 invalid!',None):

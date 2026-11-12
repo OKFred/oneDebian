@@ -223,9 +223,14 @@ def setup(i, public_key, port=2222):
                    '[Service]\nType=simple\nExecStart=' + command + '\nRestart=on-failure\nRestartSec=3\n'
                    '\n[Install]\nWantedBy=multi-user.target\n')
         i.owned_file(unit_path, content); written[unit_path] = _hash(unit_path)
-        i.run(['systemctl', 'daemon-reload'])
-        i.run(['systemctl', 'enable', UNIT]); start_attempted = True
-        i.run(['systemctl', 'restart' if previous.get('ActiveState') == 'active' else 'start', UNIT])
+        changed = any(before[path] is None or before[path] != (path.read_text(), stat.S_IMODE(path.stat().st_mode))
+                      for path in written)
+        if before[unit_path] != (content, stat.S_IMODE(unit_path.stat().st_mode)):
+            i.run(['systemctl', 'daemon-reload'])
+        if previous.get('UnitFileState') != 'enabled': i.run(['systemctl', 'enable', UNIT])
+        if changed or previous.get('ActiveState') != 'active' or not _listener_owned(i, port, previous.get('MainPID')):
+            start_attempted = True
+            i.run(['systemctl', 'restart' if previous.get('ActiveState') == 'active' else 'start', UNIT])
         deadline = time.monotonic() + 8
         while True:
             status = _unit(i, UNIT)

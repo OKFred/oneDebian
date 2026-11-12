@@ -307,6 +307,8 @@ function Complete-WslAgentAccess {
     } catch { throw "工作机已就绪，但本机查看入口尚未接通 / Workstation ready; viewer unavailable. $($_.Exception.Message)" }
     try {
         $entry = Send-WslAgentBundle -Distro $Distro
-        Initialize-WslAgentSsh -Distro $Distro -Entry $entry -SshPort $SshPort
-    } catch { throw "工作机和查看入口已就绪，SSH 配置尚未完成，请用 09 → 14 重试。 / SSH incomplete: $($_.Exception.Message)" }
+        $sshOptions = @{Distro = $Distro; Entry = $entry}
+        if ($PSBoundParameters.ContainsKey('SshPort')) { $sshOptions.SshPort = $SshPort }
+        Initialize-WslAgentSsh @sshOptions
+    } catch { throw "工作机和查看入口已就绪，SSH 尚未齐备；可重新执行安装检查补齐。 / SSH incomplete: $($_.Exception.Message)" }
 }

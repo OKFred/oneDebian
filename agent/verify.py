@@ -29,7 +29,7 @@ CONFIG = Path('/etc/onedebian-agent/config.json')
 PROBE_CONFIG = Path('/run/onedebian-agent-gpu/config.json')
 VERSIONS = Path('/etc/onedebian-agent/versions.json')
 HELPERS = Path(__file__).resolve().parent
-SOFTWARE = re.compile(r'llvmpipe|softpipe|swiftshader|lavapipe|software|\bwarp\b|basic render|virgl|svga3d', re.I)
+SOFTWARE = re.compile(r'llvmpipe|softpipe|swiftshader|lavapipe|software|\bwarp\b|basic[\s_-]*render|virgl|svga3d', re.I)
 WEBGL_JS = r'''(() => {
   function draw(kind) {
     const canvas = document.createElement('canvas'); canvas.width=8; canvas.height=8;
@@ -68,7 +68,7 @@ def hardware_renderer(value):
 
 
 def d3d12_renderer(value):
-    return hardware_renderer(value) and bool(re.search(r'\bD3D12\s*\(\s*Intel\b', value, re.I))
+    return hardware_renderer(value) and bool(re.search(r'\bD3D12\s*\(\s*[^()\s]', value, re.I))
 
 
 def d3d12_evidence(process):

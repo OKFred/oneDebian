@@ -76,8 +76,23 @@ class InstallerTests(unittest.TestCase):
         with install.zipfile.ZipFile(archive,'w') as zipped: zipped.writestr('fnm',b'fixture-fnm')
         digest=hashlib.sha256(archive.read_bytes()).hexdigest()
         install.write_json(install.ETC/'config.json',{'mcp_port':18931})
+        installed={'pnpm':False}
+        node_bin=home/'.local/share/fnm/node-versions'/install.VERSIONS['node']/'installation/bin'
         def command(_user,argv,**kwargs):
-            value=install.VERSIONS['pnpm'] if argv[-2:]==['pnpm','--version'] else install.VERSIONS['node']
+            if 'install' in argv and 'npm' not in argv:
+                node_bin.mkdir(parents=True,exist_ok=True); (node_bin/'node').touch()
+            if '--global' in argv:
+                installed['pnpm']=True; (node_bin/'pnpm').touch()
+            if '--prefix' in argv:
+                tools=Path(argv[argv.index('--prefix')+1])/'node_modules'
+                for package,entry,key in [('@playwright/mcp','cli.js','mcp'),('@openai/codex','bin/codex.js','codex')]:
+                    folder=tools/package; (folder/entry).parent.mkdir(parents=True,exist_ok=True)
+                    (folder/entry).touch(); (folder/'package.json').write_text(json.dumps({'version':install.VERSIONS[key]}))
+            if argv[-1:] == ['--version'] and 'exec' not in argv: value='fnm '+install.VERSIONS['fnm'].removeprefix('v')
+            elif Path(argv[-2]).name=='pnpm' and argv[-1]=='--version': value=install.VERSIONS['pnpm'] if installed['pnpm'] else 'missing'
+            elif argv[-2].endswith('/@playwright/mcp/cli.js'): value='Version '+install.VERSIONS['mcp']
+            elif argv[-2].endswith('/@openai/codex/bin/codex.js'): value='codex-cli '+install.VERSIONS['codex']
+            else: value=install.VERSIONS['node']
             return types.SimpleNamespace(stdout=value+'\n')
         with mock.patch.object(install,'capture',return_value='amd64'), \
              mock.patch.object(install,'FNM',{'amd64':('fnm-fixture.zip',digest)}), \
@@ -395,14 +410,20 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(install.start_install(options()),status)
         payload.assert_not_called(); command.assert_not_called()
 
-    def test_ready_install_is_idempotent(self):
+    def test_ready_install_still_checks_and_submits_convergence(self):
         install.write_json(install.STATE / 'installed.json',{'owner':install.OWNER})
+        install.write_json(install.ETC / 'config.json',{'user':'agent','viewer_port':16080})
         status = {'state':'READY_SOFTWARE','job_active':False}
         with mock.patch.object(install,'require_root'), mock.patch.object(install,'plan',return_value={'systemd':True,'warnings':[]}), \
              mock.patch.object(install,'active',return_value=False), mock.patch.object(install,'status',return_value=status), \
-             mock.patch.object(install,'owned_directories') as write, mock.patch.object(install,'run') as command:
+             mock.patch.object(install,'owned_directories'), mock.patch.object(install,'prepare_changes',return_value=install), \
+             mock.patch.object(install,'user_record'), mock.patch.object(install,'save_payload') as payload, \
+             mock.patch.object(install,'owned_file'), mock.patch.object(install,'subprocess') as child, \
+             mock.patch.object(install,'run') as command:
+            child.run.return_value.returncode=1
             self.assertEqual(install.start_install(options()),status)
-        write.assert_not_called(); command.assert_not_called()
+        payload.assert_called_once()
+        self.assertIn(mock.call(['systemctl','start','--no-block',install.JOB]),command.call_args_list)
 
     def test_timeout_keeps_failure_state_and_original_diagnostic(self):
         with mock.patch.object(install,'require_root'), mock.patch.object(install,'user_record'), \
@@ -420,7 +441,7 @@ class InstallerTests(unittest.TestCase):
         def command(argv, **kwargs):
             if 'install' in argv:
                 raise install.subprocess.CalledProcessError(100,argv)
-        with mock.patch.object(install,'run',side_effect=command):
+        with mock.patch.object(install,'run',side_effect=command), mock.patch.object(install,'capture',return_value=''):
             with self.assertRaises(install.subprocess.CalledProcessError):
                 install.packages(options())
         install.package_undo.install_args.assert_called_once()
@@ -457,6 +478,8 @@ class InstallerTests(unittest.TestCase):
     def test_ready_install_cannot_race_an_active_cleanup(self):
         install.write_json(install.STATE / 'installed.json',{'owner':install.OWNER})
         with mock.patch.object(install,'require_root'), mock.patch.object(install,'active',return_value=False), \
+             mock.patch.object(install,'plan',return_value={'systemd':True,'warnings':[]}), \
+             mock.patch.object(install,'port_free',return_value=True), \
              mock.patch.object(install,'status',return_value={'state':'READY_SOFTWARE'}), \
              mock.patch.object(install,'run') as command:
             with install.operation_lock():
@@ -549,7 +572,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(project.read_text(),'project')
         self.assertEqual(keyring.read_text(),'encrypted')
 
-    def test_interrupted_phase_requires_resume_not_fake_success(self):
+    def test_interrupted_phase_reports_incomplete_not_fake_success(self):
         install.write_json(install.STATE / 'state.json',{'state':'RUNTIME','phase':'RUNTIME'})
         with mock.patch.object(install,'active',return_value=False):
             status = install.status()
@@ -571,7 +594,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual((unit_dir / 'onedebian-agent-desktop.service').read_text(),'local service override')
 
     def test_required_packages_do_not_trigger_full_upgrade(self):
-        with mock.patch.object(install,'run') as command:
+        with mock.patch.object(install,'run') as command, mock.patch.object(install,'capture',return_value=''):
             install.packages(options())
         arguments = [call.args[0] for call in command.call_args_list]
         self.assertEqual(len(arguments),2)

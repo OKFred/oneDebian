@@ -66,6 +66,16 @@ function Initialize-WslAgentSsh {
     if ((Test-Path -LiteralPath $root) -and (-not (Test-Path -LiteralPath $marker) -or [IO.File]::ReadAllText($marker) -cne $owner)) { throw 'Existing SSH metadata is not owned by oneDebian; it was retained.' }
     $record = if (Test-Path -LiteralPath $recordPath) { [IO.File]::ReadAllText($recordPath) | ConvertFrom-Json -ErrorAction Stop } else { $null }
     if ($record -and ($record.owner -cne $owner -or $record.distro -cne $Distro -or $record.alias -cne $alias)) { throw 'SSH alias belongs to a different target; no files were replaced.' }
+    if (-not $PSBoundParameters.ContainsKey('SshPort')) {
+        if ($record) { $SshPort = [int]$record.port }
+        else {
+            $statusResult = Invoke-WslAgentCommand -Distro $Distro -Entry $Entry -Command status -Options @('--json') -Timeout 30000 -AllowFailure
+            try { $guest = $statusResult.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw 'Could not read existing workstation SSH settings.' }
+            if ($statusResult.ExitCode -ne 0) { throw "Could not inspect existing SSH configuration: $($statusResult.ErrorText)" }
+            if ($guest.ssh -and $guest.ssh.port) { $SshPort = [int]$guest.ssh.port }
+        }
+        if ($SshPort -lt 1024 -or $SshPort -gt 65535) { throw 'Recorded SSH port is invalid; its identity was retained.' }
+    }
     foreach ($item in @(@($fragment, 'config_sha256'), @($known, 'known_sha256'))) {
         if (Test-Path -LiteralPath $item[0]) {
             if (-not $record -or (Get-FileHash -LiteralPath $item[0] -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$record.($item[1])) { throw 'Existing SSH alias or host-key file was changed; review it before retrying.' }
@@ -122,7 +132,7 @@ function Initialize-WslAgentSsh {
     $publicSha = (Get-FileHash -LiteralPath $public -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($checked.ExitCode -ne 0 -or $derivedKey -cne $publicKey -or ($keyMetadata.public_key -and $keyMetadata.public_key -cne $publicKey) -or ($keyMetadata.private_sha256 -and $keyMetadata.private_sha256 -cne $privateSha) -or ($keyMetadata.public_sha256 -and $keyMetadata.public_sha256 -cne $publicSha)) { throw 'Dedicated private/public SSH key does not match its recorded identity; it was retained.' }
     Write-WslAgentSshFile -Path $keyRecord -Text (@{owner = $owner; state = 'READY'; public_key = $publicKey; private_sha256 = $privateSha; public_sha256 = $publicSha} | ConvertTo-Json -Compress)
-    Write-Host '正在安装并验证 SSH / SSH setup；客机日志：/var/lib/onedebian-agent/ssh.log'
+    Write-Host '正在检查并补齐 SSH / SSH check；客机日志：/var/lib/onedebian-agent/ssh.log'
     $backend = Invoke-WslAgentCommand -Distro $Distro -Entry $Entry -Command ssh -Options @('--yes', '--ssh-public-key', $publicKey, '--ssh-port', [string]$SshPort, '--json') -Timeout 0 -AllowFailure
     try { $ready = $backend.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw "SSH setup returned invalid data: $($backend.ErrorText)" }
     if ($backend.ExitCode -ne 0 -or $ready.state -cne 'SSH_READY' -or [int]$ready.port -ne $SshPort) { throw "SSH setup failed: $($ready.error) $($ready.reason) $($backend.ErrorText)" }

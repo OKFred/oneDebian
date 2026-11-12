@@ -83,13 +83,65 @@ function Get-WslAgentStatus {
     catch { throw 'Agent status was not valid JSON; the installation state is unknown.' }
 }
 
+function Get-WslAgentPreparation {
+    param([string]$Distro)
+    # Read metadata directly: an interrupted installation may not have a runnable deployed entry.
+    $query = @'
+set -eu
+state=/var/lib/onedebian-agent
+config=/etc/onedebian-agent/config.json
+for item in "$state" "$state/.owner" "$state/user-owned" "$state/cleanup-completed.json" "$state/installed.json" "$state/state.json" /etc/onedebian-agent "$config"; do
+  [ ! -L "$item" ] || { printf 'Refusing symlink metadata: %s\n' "$item" >&2; exit 1; }
+done
+owned=false; prepared=false; agent_exists=false; completed=false
+if [ -f "$state/.owner" ]; then
+  [ "$(cat "$state/.owner")" = oneDebian-agent-v1 ] || { printf 'Agent owner mismatch\n' >&2; exit 1; }
+  [ ! -f "$state/user-owned" ] || owned=true
+  if [ "$owned" = true ] && [ ! -f "$state/cleanup-completed.json" ]; then prepared=true; fi
+fi
+if id -u agent >/dev/null 2>&1; then agent_exists=true; fi
+[ ! -f "$state/installed.json" ] || completed=true
+printf '{"prepared":%s,"agent_owned":%s,"agent_exists":%s,"completed":%s,"config":' "$prepared" "$owned" "$agent_exists" "$completed"
+if [ "$prepared" = true ] && [ -f "$config" ]; then cat "$config"; else printf null; fi
+printf ',"state":'
+if [ "$prepared" = true ] && [ -f "$state/state.json" ]; then cat "$state/state.json"; else printf null; fi
+printf '}\n'
+'@
+    $result = Invoke-WslAgentShell -Distro $Distro -Script $query
+    try {
+        $metadata = $result.Text | ConvertFrom-Json -ErrorAction Stop
+        foreach ($field in @('prepared', 'agent_owned', 'agent_exists', 'completed')) {
+            if ($metadata.$field -isnot [bool]) { throw 'Invalid preparation flag.' }
+        }
+        foreach ($field in @('config', 'state')) {
+            if ($null -ne $metadata.$field -and $metadata.$field -isnot [pscustomobject]) { throw 'Invalid installation metadata.' }
+        }
+        if ($metadata.config) {
+            $ports = @($metadata.config.viewer_port, $metadata.config.mcp_port, $metadata.config.cdp_port)
+            if (@($ports | Select-Object -Unique).Count -ne 3 -or @($ports | Where-Object { $_ -isnot [ValueType] -or $_ -lt 1024 -or $_ -gt 65535 -or [int]$_ -ne $_ }).Count) { throw 'Invalid configured ports.' }
+        }
+        return $metadata
+    } catch { throw 'Agent preparation metadata is invalid; no setup or configuration changes were attempted.' }
+}
+
+function Confirm-WslAgentPreparedSystemd {
+    param([string]$Distro, [switch]$RestartSelected)
+    if ((Invoke-WslAgentShell -Distro $Distro -Script 'cat /proc/1/comm').Text.Trim() -eq 'systemd') { return }
+    if (-not $RestartSelected -and (Read-Host "已有安装的 systemd 尚未运行；只重启 $Distro，不修改已有设置？/ Restart selected [y/N]") -ne 'Y') {
+        throw 'Restart deferred. Existing installation settings were retained; retry Install after starting systemd.'
+    }
+    $stopped = Invoke-WslCommand -Arguments @('--terminate', $Distro) -TimeoutMilliseconds 30000
+    if ($stopped.ExitCode -ne 0) { throw "Could not stop selected instance: $($stopped.ErrorText)" }
+    if ((Invoke-WslAgentShell -Distro $Distro -Script 'cat /proc/1/comm' -Timeout 60000).Text.Trim() -ne 'systemd') { throw 'The selected instance did not start with systemd; existing settings were retained.' }
+}
+
 function Get-WslAgentProgressText {
     param($Status)
     $labels = @{
-        PRECHECK = '[1/5] 准备安装 / Preparing'
-        PACKAGES = '[2/5] 安装系统依赖：桌面、浏览器、中文支持 / Packages'
-        RUNTIME = '[3/5] 安装开发工具：fnm、Node.js、Codex CLI、浏览器 MCP / Runtime'
-        SERVICES = '[4/5] 配置并启动工作环境（含图形检测） / Services'
+        PRECHECK = '[1/5] 检查安装条件 / Preparing'
+        PACKAGES = '[2/5] 检查并补齐系统依赖：桌面、浏览器、中文支持 / Packages'
+        RUNTIME = '[3/5] 检查并补齐开发工具：fnm、Node.js、Codex CLI、浏览器 MCP / Runtime'
+        SERVICES = '[4/5] 检查配置和服务，按需启动 / Services'
         VERIFY = '[5/5] 检查运行时、服务、浏览器和访问入口 / Verification'
         READY_SOFTWARE = '安装完成，使用软件渲染 / Ready (Software)'
         READY_GPU = '安装完成，硬件加速已启用 / Ready (GPU)'
@@ -116,8 +168,8 @@ function Wait-WslAgentInstall {
         $progress = Get-WslAgentProgressText -Status $status
         Write-Host ("[{0:hh\:mm\:ss}] {1}：{2}" -f $watch.Elapsed, $Distro, $progress)
         if ($status.state -in 'READY_SOFTWARE', 'READY_GPU') { return $status }
-        if ($status.state -in 'ERROR', 'INTERRUPTED') { throw "安装已停止 / Stopped：$($status.error)。日志 / Log：$($status.log)。请使用继续安装 / Resume，实例和资料已保留。" }
-        if (-not $status.job_active) { throw "安装任务未运行 / Not running：$progress。请查看状态或继续安装 / Status / Resume；未启动第二个任务。" }
+        if ($status.state -in 'ERROR', 'INTERRUPTED') { throw "安装已停止 / Stopped：$($status.error)。日志 / Log：$($status.log)。请再次安装／检查补齐 / Install，实例和资料已保留。" }
+        if (-not $status.job_active) { throw "安装任务未运行 / Not running：$progress。请查看状态或再次安装／检查补齐 / Status / Install；未启动第二个任务。" }
         Start-Sleep -Seconds 10
     }
 }
@@ -279,11 +331,15 @@ function Invoke-WslAgent {
         [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222, [int]$SshPort = 2222,
         [switch]$Yes, [switch]$RestartSelected, [switch]$AdoptUser, [switch]$Autostart, [switch]$NoWait, [switch]$AllowLowResources
     )
+    $sshPortExplicit = $PSBoundParameters.ContainsKey('SshPort')
+    $interactiveMenu = $Action -eq 'Menu'
+    # Compatibility for old command lines; all retries now use the same Install path.
+    if ($Action -eq 'Resume') { $Action = 'Install' }
     if ($Action -eq 'Menu') {
         Write-Host "`n09 Agent 工作机 / Agent workstation"
         Write-Host '1. 新建独立 ai-dev / Create independent WSL (default)'
-        Write-Host '2. 安装到指定已有 WSL / Install in selected WSL'
-        Write-Host '3. 继续安装 / Resume    4. 状态 / Status'
+        Write-Host '2. 安装／检查补齐指定已有 WSL / Install'
+        Write-Host '4. 状态 / Status'
         Write-Host '5. 验收 / Verify         6. 打开桌面 / Open desktop'
         Write-Host '7. 卸载工具并保留资料 / Uninstall (keep data)'
         Write-Host '8. 启动本机转发 / Relay start    9. 停止本机转发 / Relay stop'
@@ -295,7 +351,7 @@ function Invoke-WslAgent {
         Write-Host '15. 更新桌面控件与浏览器入口 / Desktop update'
         Write-Host '0. 返回 / Back'
         $choice = Read-Host '选择 / Select [1]'
-        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup'; '12' = 'Graphics'; '13' = 'Keyring'; '14' = 'Ssh'; '15' = 'DesktopUpdate' }
+        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Install'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup'; '12' = 'Graphics'; '13' = 'Keyring'; '14' = 'Ssh'; '15' = 'DesktopUpdate' }
         if (-not $choice) { $choice = '1' }
         if ($choice -eq '0') { return }
         if (-not $actions.ContainsKey($choice)) { throw 'Invalid Agent action.' }
@@ -304,7 +360,7 @@ function Invoke-WslAgent {
             $name = Read-Host '实例名 / Distro name [ai-dev]'; $DistroName = if ($name) { $name.Trim() } else { 'ai-dev' }
             $root = Read-Host "安装根目录 / WSL root [$WslRoot]"; if ($root) { $WslRoot = $root }
         } else { $DistroName = Select-WslDistro; if (-not $DistroName) { return } }
-        if ($Action -in 'Create', 'Install') {
+        if ($Action -eq 'Create') {
             $defaultMirror = if ($Action -eq 'Create') { 'tuna' } else { 'keep' }
             $selection = Read-Host "客机 APT 源 / Guest mirror: keep / tuna / ustc / official [$defaultMirror]"
             $Mirror = if ($selection) { $selection.Trim() } else { $defaultMirror }
@@ -321,7 +377,7 @@ function Invoke-WslAgent {
     $new = $Action -eq 'Create'
     if ($new) {
         if ($DistroName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw 'New distro names may contain letters, digits, dots, underscores and hyphens.' }
-        if ($registered -contains $DistroName -or (Test-Path -LiteralPath (Join-Path $WslRoot $DistroName))) { throw 'Distro or installation directory already exists. Use an explicit Install, Status or Resume action instead.' }
+        if ($registered -contains $DistroName -or (Test-Path -LiteralPath (Join-Path $WslRoot $DistroName))) { throw 'Distro or installation directory already exists. Use an explicit Install or Status action instead.' }
         Test-WslAgentPorts -Ports @($ViewerPort, $McpPort, $CdpPort)
         $AllowLowResources = Confirm-WslAgentResources -WslRoot $WslRoot -AllowLowResources:$AllowLowResources -Yes:$Yes
     } elseif ($registered -notcontains $DistroName) { throw "WSL distribution is not registered: $DistroName" }
@@ -343,7 +399,9 @@ function Invoke-WslAgent {
         Write-Host "配置 $DistroName 的密钥 SSH 与固定别名；仅实例回环监听，不开放 Windows 22。 / Key-only SSH" -ForegroundColor Yellow
         if (-not $Yes -and (Read-Host '配置并启动 SSH？/ Apply [y/N]') -ne 'Y') { return }
         $entry = Send-WslAgentBundle -Distro $DistroName
-        Initialize-WslAgentSsh -Distro $DistroName -Entry $entry -SshPort $SshPort
+        $sshOptions = @{Distro = $DistroName; Entry = $entry}
+        if ($sshPortExplicit) { $sshOptions.SshPort = $SshPort }
+        Initialize-WslAgentSsh @sshOptions
         return
     }
     if ($Action -eq 'Keyring') {
@@ -398,21 +456,24 @@ function Invoke-WslAgent {
         }
         return
     }
-    if ($Action -eq 'Resume') {
-        $pid1 = (Invoke-WslAgentShell -Distro $DistroName -Script 'cat /proc/1/comm').Text.Trim()
-        if ($pid1 -ne 'systemd') { Initialize-WslAgentSystemd -Distro $DistroName -Entry '/opt/onedebian-agent/agent.sh' -RestartSelected:$RestartSelected }
-        $resumeOptions = @('--json', '--viewer-port', [string]$ViewerPort, '--mcp-port', [string]$McpPort, '--cdp-port', [string]$CdpPort)
-        if ($AllowLowResources) { $resumeOptions += '--allow-low-resources' }
-        if ($AdoptUser) { $resumeOptions += '--adopt-user' }
-        if ($Mirror) { $resumeOptions += @('--mirror', $Mirror) }
-        $result = Invoke-WslAgentCommand -Distro $DistroName -Command resume -Options $resumeOptions -Timeout 0
-        Write-Host "已请求继续安装 / Resume requested: $DistroName"
-        if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName -SshPort $SshPort }
-        return
+    $preparation = if ($new) { $null } else { Get-WslAgentPreparation -Distro $DistroName }
+    if ($preparation.config) {
+        $ViewerPort = [int]$preparation.config.viewer_port
+        $McpPort = [int]$preparation.config.mcp_port
+        $CdpPort = [int]$preparation.config.cdp_port
+    } elseif ($interactiveMenu -and -not $new) {
+        $selection = Read-Host '客机 APT 源 / Guest mirror: keep / tuna / ustc / official [keep]'
+        $Mirror = if ($selection) { $selection.Trim() } else { '' }
+        if ($Mirror -and $Mirror -notin 'keep', 'tuna', 'ustc', 'official') { throw 'Invalid APT mirror.' }
+        foreach ($setting in @(@('ViewerPort', 'noVNC', $ViewerPort), @('McpPort', 'MCP', $McpPort), @('CdpPort', 'CDP', $CdpPort))) {
+            $value = Read-Host "$($setting[1]) 端口 / port [$($setting[2])]"
+            if ($value) { Set-Variable -Name $setting[0] -Value ([int]$value) }
+        }
     }
-    if (-not $Mirror) { $Mirror = if ($new) { 'tuna' } else { 'keep' } }
-    Write-Host "目标 / Target: $DistroName | APT: $Mirror | noVNC $ViewerPort / MCP $McpPort / CDP $CdpPort" -ForegroundColor Cyan
-    Write-Host '安装依赖并创建独立浏览器桌面；不升级整个系统、不改其他 WSL 或全局 .wslconfig。' -ForegroundColor Yellow
+    if ($new -and -not $Mirror) { $Mirror = 'tuna' }
+    $mirrorLabel = if ($Mirror) { $Mirror } elseif (-not $preparation.completed -and $preparation.state.mirror) { [string]$preparation.state.mirror } else { 'keep' }
+    Write-Host "目标 / Target: $DistroName | APT: $mirrorLabel | noVNC $ViewerPort / MCP $McpPort / CDP $CdpPort" -ForegroundColor Cyan
+    Write-Host '安装／检查补齐工作环境；保留已有端口、浏览器资料和正常组件，不升级整个系统、不改其他 WSL 或全局 .wslconfig。' -ForegroundColor Yellow
     $globalConfig = Join-Path $env:USERPROFILE '.wslconfig'
     if (Test-Path -LiteralPath $globalConfig) {
         $content = [IO.File]::ReadAllText($globalConfig)
@@ -421,6 +482,11 @@ function Invoke-WslAgent {
         }
     }
     if ($new) { Write-Host "新建位置: $(Join-Path $WslRoot $DistroName)；启用 systemd、默认 agent、关闭 Windows 磁盘挂载/互操作、保护 WSL 网络，并只重启新实例。" }
+    if ($preparation.prepared) { Write-Host '已准备的工作机：保留已有 systemd、网络、挂载和互操作设置；运行中的安装只观察，不重复启动。 / Check existing installation.' }
+    if ($preparation.agent_exists -and -not $preparation.agent_owned -and -not $AdoptUser) {
+        if ($Yes -or (Read-Host '已有非本工具管理的 agent 用户，明确接纳并保留密码和资料？/ Adopt [y/N]') -ne 'Y') { throw 'Existing agent account requires explicit -AdoptUser consent; its password and data were retained.' }
+        $AdoptUser = $true
+    }
     if ($AdoptUser) { Write-Host '显式接纳已有 agent 用户；不更改其密码或复制凭据。' -ForegroundColor Yellow }
     Write-Host '新凭据库自动设为空密码（未加密）；已有库和旧密码保留。Node 中全局安装 pnpm。 / New keyring: empty; existing: retained; pnpm: global.' -ForegroundColor Yellow
     Write-Host '就绪后自动配置密钥 SSH、固定别名和实例开机自启；本机私钥留在 Windows。 / SSH: automatic.' -ForegroundColor Yellow
@@ -430,26 +496,39 @@ function Invoke-WslAgent {
         if (@(Get-WslDistros) -notcontains $DistroName) { throw 'The rootfs import did not complete. No Agent installation was started.' }
     }
     $entry = Send-WslAgentBundle -Distro $DistroName
-    $AllowLowResources = Confirm-WslAgentResources -Distro $DistroName -AllowLowResources:$AllowLowResources -Yes:$Yes
-    Initialize-WslAgentSystemd -Distro $DistroName -Entry $entry -Mirror $Mirror -NewInstance:$new -RestartSelected:$RestartSelected -AdoptUser:$AdoptUser
+    if ($preparation.state.allow_low_resources) { $AllowLowResources = $true }
+    $prechecked = $preparation.config -and ($preparation.completed -or $preparation.state.precheck_passed -or $preparation.state.state -in 'PRECHECK', 'PACKAGES', 'RUNTIME', 'SERVICES', 'VERIFY', 'ERROR')
+    if (-not $prechecked) { $AllowLowResources = Confirm-WslAgentResources -Distro $DistroName -AllowLowResources:$AllowLowResources -Yes:$Yes }
+    if ($preparation.prepared) { Confirm-WslAgentPreparedSystemd -Distro $DistroName -RestartSelected:$RestartSelected }
+    else {
+        $prepareMirror = if ($Mirror) { $Mirror } else { 'keep' }
+        Initialize-WslAgentSystemd -Distro $DistroName -Entry $entry -Mirror $prepareMirror -NewInstance:$new -RestartSelected:$RestartSelected -AdoptUser:$AdoptUser
+    }
     if ($new) {
         $residency = Set-WslDistroResidency -DistroName $DistroName -KeepAlive $true
         if (-not $residency.Success) {
-            throw "Background residency could not be verified for ${DistroName}: $($residency.Error) The instance and installer were retained; Agent installation has not started. Repair residency in menu 07, then Resume with the original mirror and port options."
+            throw "Background residency could not be verified for ${DistroName}: $($residency.Error) The instance and installer were retained; Agent installation has not started. Repair residency in menu 07, then Install with the original mirror and port options."
         }
         if ($Autostart) {
             $startup = Set-WslDistroAutostart -DistroName $DistroName -Enabled $true
             if (-not $startup.Success) {
-                throw "Windows sign-in startup could not be verified for ${DistroName}: $($startup.Error) The instance and installer were retained; Agent installation has not started. Repair startup in menu 07, then Resume with the original mirror and port options."
+                throw "Windows sign-in startup could not be verified for ${DistroName}: $($startup.Error) The instance and installer were retained; Agent installation has not started. Repair startup in menu 07, then Install with the original mirror and port options."
             }
         }
     }
-    $options = @('--yes', '--json', '--mirror', $Mirror, '--viewer-port', [string]$ViewerPort, '--mcp-port', [string]$McpPort, '--cdp-port', [string]$CdpPort)
+    $options = @('--yes', '--json')
+    if ($Mirror) { $options += @('--mirror', $Mirror) }
+    if (-not $preparation.config) { $options += @('--viewer-port', [string]$ViewerPort, '--mcp-port', [string]$McpPort, '--cdp-port', [string]$CdpPort) }
     if ($AdoptUser) { $options += '--adopt-user' }
     if ($AllowLowResources) { $options += '--allow-low-resources' }
     $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command install -Options $options -Timeout 0
-    Write-Host "安装任务已提交 / Installation job submitted: $DistroName"
-    if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName -SshPort $SshPort }
-    else { Write-Host '后台安装完成后，运行 09 → 3 继续或 09 → 14 配置 SSH。 / SSH after install.' }
+    Write-Host "安装／检查补齐已提交 / Install requested: $DistroName"
+    if (-not $NoWait) {
+        $null = Wait-WslAgentInstall -Distro $DistroName
+        $accessOptions = @{ Distro = $DistroName }
+        if ($sshPortExplicit) { $accessOptions.SshPort = $SshPort }
+        Complete-WslAgentAccess @accessOptions
+    }
+    else { Write-Host '后台任务由状态入口查看；完成后再次运行安装／检查补齐，自动检查 SSH 和查看入口。 / Status / Install.' }
     Write-Host "后续 / Next: .\agent-via-wsl.ps1 -Action Status -DistroName $DistroName"
 }

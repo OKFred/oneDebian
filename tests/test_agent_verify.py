@@ -19,10 +19,16 @@ spec.loader.exec_module(verify)
 
 
 class VerifierTests(unittest.TestCase):
-    def test_d3d12_requires_intel_dxg_and_both_loaded_libraries(self):
-        self.assertTrue(verify.d3d12_renderer('ANGLE (Microsoft, D3D12 (Intel(R) Iris(R) Xe Graphics), OpenGL 4.1)'))
-        for name in ['llvmpipe','D3D12 (Microsoft WARP)','Intel OpenGL','D3D12 (NVIDIA Graphics)']:
-            self.assertFalse(verify.d3d12_renderer(name))
+    def test_d3d12_accepts_hardware_vendors_but_requires_dxg_and_both_libraries(self):
+        for adapter in ['Intel(R) Iris(R) Xe Graphics', 'AMD Radeon RX 6600', 'NVIDIA GeForce RTX 4060']:
+            with self.subTest(adapter=adapter):
+                self.assertTrue(verify.d3d12_renderer('ANGLE (Microsoft, D3D12 (' + adapter + '), OpenGL 4.1)'))
+        for name in ['', 'llvmpipe', 'D3D12 (llvmpipe)', 'D3D12 (Microsoft WARP)',
+                     'D3D12 (Microsoft Basic Render Driver)', 'D3D12 (BasicRenderDriver)',
+                     'D3D12 (Google SwiftShader)', 'Intel OpenGL', 'AMD Radeon RX 6600 (radeonsi)',
+                     'NVIDIA GeForce OpenGL', 'D3D12 ()', 'D3D12 ( )', 'D3D12 NVIDIA Graphics']:
+            with self.subTest(renderer=name):
+                self.assertFalse(verify.d3d12_renderer(name))
         with tempfile.TemporaryDirectory() as temporary:
             process = Path(temporary); (process/'fd').mkdir()
             maps = process/'maps'; maps.write_text('/usr/lib/wsl/lib/libd3d12.so\n/usr/lib/wsl/lib/libdxcore.so\n')
@@ -45,13 +51,15 @@ class VerifierTests(unittest.TestCase):
             self.assertEqual(found[0]['device'],'/dev/dxg')
 
     def test_d3d12_shader_checks_accept_combined_webgl_status_but_reject_disabled_webgl2(self):
-        renderer='ANGLE (Microsoft, D3D12 (Intel(R) Iris(R) Xe Graphics), OpenGL 4.1)'
-        for explicit in (None,'disabled_software'):
-            with self.subTest(webgl2_status=explicit):
+        for adapter, explicit in [(name, status) for name in
+                ('Intel(R) Iris(R) Xe Graphics', 'AMD Radeon RX 6600', 'NVIDIA GeForce RTX 4060')
+                for status in (None, 'disabled_software')]:
+            renderer='ANGLE (Microsoft, D3D12 (' + adapter + '), OpenGL 4.1)'
+            with self.subTest(adapter=adapter, webgl2_status=explicit):
                 runner=verify.Verifier.__new__(verify.Verifier)
                 runner.cfg={'gpu_backend':'d3d12','render_node':'','cdp_port':19222}
                 runner.report={}; runner.uid=os.getuid(); runner.browser_pid=100
-                runner.env={'GALLIUM_DRIVER':'d3d12','MESA_D3D12_DEFAULT_ADAPTER_NAME':'Intel'}
+                runner.env={'GALLIUM_DRIVER':'d3d12'}
                 features={'gpu_compositing':'enabled','webgl':'enabled'}
                 if explicit: features['webgl2']=explicit
                 draws={kind:dict(passed=True,renderer=renderer,pixel=[0,255,0,255]) for kind in ('webgl','webgl2')}
@@ -104,11 +112,12 @@ class VerifierTests(unittest.TestCase):
         with mock.patch.object(verify.pwd,'getpwnam',return_value=account),mock.patch.object(verify.os,'geteuid',return_value=0):
             runner=verify.Verifier(config,{'node':'v26.13.0'})
         self.assertEqual(runner.env['GALLIUM_DRIVER'],'d3d12')
-        self.assertEqual(runner.env['MESA_D3D12_DEFAULT_ADAPTER_NAME'],'Intel')
+        self.assertNotIn('MESA_D3D12_DEFAULT_ADAPTER_NAME',runner.env)
         self.assertNotIn('LIBGL_ALWAYS_SOFTWARE',runner.env)
 
     def test_software_renderers_never_pass(self):
         for name in ['', 'llvmpipe (LLVM 20)', 'ANGLE (Google SwiftShader)', 'Microsoft WARP',
+                     'Microsoft Basic Render Driver', 'BasicRenderDriver', 'Basic_Render_Driver',
                      'Mesa softpipe', 'lavapipe', 'Software Rasterizer','SVGA3D','virgl']:
             with self.subTest(name=name):
                 self.assertFalse(verify.hardware_renderer(name))
