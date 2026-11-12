@@ -508,7 +508,7 @@ def _allowed(i, path):
     launchers = [home / base / ('agent-' + part + '.desktop')
                  for base, part in [('Desktop', 'takeover'), ('Desktop', 'resume'), ('Desktop', 'browser'), ('.config/autostart', 'controls')]]
     guards = [BASE / 'etc/systemd/system' / name / '90-onedebian-agent.conf' for name in ('ssh.service.d', 'ssh.socket.d')]
-    return path in units + launchers + guards
+    return path in units + launchers + guards + [BASE / 'etc/sudoers.d/onedebian-agent-browser']
 
 
 def _bashrc_restore(before, after, current):

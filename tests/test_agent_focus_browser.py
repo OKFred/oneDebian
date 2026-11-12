@@ -1,6 +1,8 @@
 """Managed-browser focus decisions; no real browser, GUI or process is touched."""
 import importlib.util
 import sys
+import subprocess
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,6 +23,9 @@ class FocusBrowserTests(unittest.TestCase):
         self.factory = mock.patch.object(focus, 'Verifier', return_value=self.control)
         self.factory.start()
         self.addCleanup(self.factory.stop)
+        starter = mock.patch.object(focus, 'ensure_browser')
+        self.starter = starter.start()
+        self.addCleanup(starter.stop)
 
     def test_existing_page_is_activated_after_identity_verification_without_new_profile(self):
         self.control.cdp.side_effect = [dict(targetInfos=[
@@ -69,6 +74,7 @@ class FocusBrowserTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(RuntimeError,'HTTP/HTTPS'):
                 focus.focus_browser(self.config,{},['https://valid.invalid',value])
         focus.Verifier.assert_not_called()
+        self.starter.assert_not_called()
         self.control.cdp.assert_not_called()
 
     def test_supported_network_and_diagnostic_urls_remain_literal(self):
@@ -110,6 +116,7 @@ class FocusBrowserTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'GPU probe is active'):
             focus.focus_browser(dict(self.config, probe_unit='onedebian-agent-gpu-probe.service'), {})
         self.control.browser_ready.assert_not_called()
+        self.starter.assert_not_called()
 
     def test_failure_is_shown_as_a_gtk_error_without_starting_another_browser(self):
         with mock.patch.object(focus, 'settings', return_value=self.config), \
@@ -130,6 +137,48 @@ class FocusBrowserTests(unittest.TestCase):
         self.assertIn('Categories=Network;WebBrowser;', desktop)
         self.assertNotIn('text/html', desktop)
         self.assertNotIn('--user-data-dir', desktop)
+
+
+class BrowserStartTests(unittest.TestCase):
+    def status(self, active='inactive', pid='0', loaded='loaded'):
+        return types.SimpleNamespace(stdout=f'LoadState={loaded}\nActiveState={active}\nMainPID={pid}\n')
+
+    def test_stopped_or_failed_service_uses_only_the_fixed_privileged_start_helper(self):
+        for active in ('inactive', 'failed'):
+            with self.subTest(active=active), mock.patch.object(focus.subprocess, 'run',
+                    side_effect=[self.status(active), types.SimpleNamespace(returncode=0)]) as command:
+                focus.ensure_browser()
+            self.assertEqual(command.call_count, 2)
+            self.assertEqual(command.call_args.args[0], ['/usr/bin/sudo', '-n', '--', '/usr/bin/python3', '-I',
+                                                        '/opt/onedebian-agent/start-browser.py'])
+            self.assertTrue(command.call_args.kwargs['check'])
+
+    def test_active_and_starting_services_are_never_restarted(self):
+        for active, pid in [('active', '12'), ('reloading', '12'), ('activating', '0')]:
+            with self.subTest(active=active), mock.patch.object(focus.subprocess, 'run',
+                    return_value=self.status(active, pid)) as command:
+                focus.ensure_browser()
+            command.assert_called_once()
+            self.assertEqual(command.call_args.args[0][0:2], ['/usr/bin/systemctl', 'show'])
+
+    def test_missing_stopping_and_inconsistent_services_are_not_started(self):
+        cases = [('inactive', '0', 'not-found'), ('deactivating', '12', 'loaded'),
+                 ('unknown', '0', 'loaded'), ('inactive', '12', 'loaded'),
+                 ('active', '0', 'loaded'), ('inactive', 'unknown', 'loaded')]
+        for active, pid, loaded in cases:
+            with self.subTest(active=active, pid=pid, loaded=loaded), \
+                 mock.patch.object(focus.subprocess, 'run', return_value=self.status(active, pid, loaded)) as command:
+                with self.assertRaises(RuntimeError): focus.ensure_browser()
+            command.assert_called_once()
+
+    def test_start_denial_and_timeouts_offer_a_root_recovery_without_retrying(self):
+        for error in [subprocess.CalledProcessError(1, focus.START_BROWSER, stderr='A password is required'),
+                      subprocess.TimeoutExpired(focus.START_BROWSER, 45)]:
+            with self.subTest(error=error), mock.patch.object(focus.subprocess, 'run',
+                    side_effect=[self.status(), error]) as command:
+                with self.assertRaisesRegex(RuntimeError, 'journalctl -u onedebian-agent-chromium.service'):
+                    focus.ensure_browser()
+            self.assertEqual(command.call_count, 2)
 
 
 if __name__ == '__main__':
