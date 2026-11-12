@@ -150,7 +150,13 @@ Codex CLI 位于 `~/.local/bin/codex`。在目标系统中，以 `agent` 用户�
 
 Git 与 OpenSSH 客户端一并安装。SSH 非交互命令和自己创建的服务可以直接使用 `/home/agent/.local/bin/node`、`npm`、`npx` 或 `codex`；这些入口显式读取记录的 fnm 版本，不依赖 `.bashrc`。真实项目可用用户级 systemd 服务运行，接管浏览器不会停止这些服务。
 
-Windows 通过 **09 → 打开桌面** 或 `-Action Open` 自动携带本地令牌。初始只读；需要手动操作时先停止 Codex 当前任务，再切换 noVNC 输入模式，点击桌面“接管浏览器”。完成后点击“交还 Codex”，切回只读并要求 Codex重新读取标签页继续。
+Windows 通过 **09 → 打开桌面** 或 `-Action Open` 自动携带本地令牌。初始只读；需要手动操作时先停止 Codex 当前任务，再切换 noVNC 输入模式，点击悬浮按钮“接管浏览器”并确认。安全接管后同一个按钮切换为“交还 Codex”；点击并确认后，切回只读并要求 Codex 重新读取标签页继续。
+
+悬浮按钮可以拖动，位置保存在普通用户的 `~/.local/share/onedebian-agent/controls-position.json`，重开桌面后恢复；显示器尺寸变化时会调整到可见区域。拖到屏幕工作区边缘会收成小标签，点击标签只展开，不会接管或交还；需要切换时再点击展开的按钮。拖动本身不会切换状态。
+
+已有工作机拉取新版后，使用 **09 → 15 更新桌面控件与浏览器入口**，或运行 `./agent-via-wsl.ps1 -Action DesktopUpdate -DistroName debian-wsl-main`；原生 Debian 使用 **14 → 11**。确认后会更新受管组件源码和桌面快捷方式，并重新打开悬浮控件，保留 Chromium、MCP、桌面会话、构建任务和本机转发。桌面的 **Agent 工作浏览器** 入口指向受管的工作浏览器，避免从通用 Chromium 图标打开另一套默认资料。
+
+按钮同时检查持久接管标记、实际 MCP 服务和端口状态。只有确认 MCP 已停止且端口不再监听，才显示可交还的人工模式；接管未完成时仍允许重试接管，状态未知时暂时禁用切换并显示原因。刷新状态不会自动启停 MCP，也不会关闭工作页面或停止构建任务。
 
 如果全局 `.wslconfig` 已设置 `localhostForwarding=false`，工作机就绪后会自动启动当前用户的专用回环转发，无须修改该设置或重启其他 WSL。`Open` 也会先验证入口身份，再按需启动转发；已有可验证的 WSL 原生转发可继续使用。未确认身份的占用端口会报错，不会停止其他程序，也不会把桌面令牌发给它。
 
@@ -182,7 +188,7 @@ GPU 分为原生 DRM 和 WSL DXG／Mesa D3D12 两条路径。`/dev/dxg` 不是 D
 
 确认后先在临时 profile 中探测；必要时短暂重启工作机 Chromium，保留项目、浏览器资料、页面和凭据，失败回到软件模式。不会重启桌面或 WSL，也不停止本机转发。人工接管期间拒绝调整，先自行交还 Codex 再重试；工具不自动清除人工标记。菜单显示后端、原因和 GPU 日志路径。`-Yes` 仅用于已明确授权的自动化，并仍须指定目标实例。
 
-本机 i5-1240P 的独立 VNC 桌面已通过 D3D12 原生 EGL 和 Chromium WebGL1/2 实际着色／像素回读探测；i5-1340P 尚未实测，目标机器仍需运行上述检查。GPU 验收可单独运行 `sudo bash ./agent.sh verify --gpu`；软件模式下该硬件验收应失败，普通浏览器验收仍应通过。
+本机 i5-1240P 的独立 VNC 桌面已直接实测通过 D3D12 原生 EGL 和 Chromium WebGL1/2 实际着色／像素回读；另一台 i5-1340P 为用户回传正式脚本验收通过。其他目标机器仍需运行上述检查。GPU 验收可单独运行 `sudo bash ./agent.sh verify --gpu`；软件模式下该硬件验收应失败，普通浏览器验收仍应通过。
 
 安装任务由 `onedebian-agent-install.service` 执行，关闭进度窗口不会主动取消后台任务，但 WSL 实例仍需保持运行。已有实例的驻留策略不会自动改变，可在 **07 状态** 中确认。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。重新运行不会启动第二个并发任务；中断后使用 Resume，保留已下载文件。
 

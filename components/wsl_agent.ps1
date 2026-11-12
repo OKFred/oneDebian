@@ -273,7 +273,7 @@ function Invoke-WslAgentCleanup {
 
 function Invoke-WslAgent {
     param(
-        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup', 'Graphics', 'Keyring', 'Ssh')][string]$Action = 'Menu',
+        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup', 'Graphics', 'Keyring', 'Ssh', 'DesktopUpdate')][string]$Action = 'Menu',
         [string]$DistroName = '', [string]$WslRoot = 'D:\wsl',
         [ValidateSet('keep', 'tuna', 'ustc', 'official')][string]$Mirror = '',
         [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222, [int]$SshPort = 2222,
@@ -292,9 +292,10 @@ function Invoke-WslAgent {
         Write-Host '12. 重新检测／启用加速 / Graphics'
         Write-Host '13. 初始化新凭据库为空密码（保留已有库） / Keyring'
         Write-Host '14. 配置固定 SSH 别名并启动服务 / SSH'
+        Write-Host '15. 更新桌面控件与浏览器入口 / Desktop update'
         Write-Host '0. 返回 / Back'
         $choice = Read-Host '选择 / Select [1]'
-        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup'; '12' = 'Graphics'; '13' = 'Keyring'; '14' = 'Ssh' }
+        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup'; '12' = 'Graphics'; '13' = 'Keyring'; '14' = 'Ssh'; '15' = 'DesktopUpdate' }
         if (-not $choice) { $choice = '1' }
         if ($choice -eq '0') { return }
         if (-not $actions.ContainsKey($choice)) { throw 'Invalid Agent action.' }
@@ -325,6 +326,19 @@ function Invoke-WslAgent {
         $AllowLowResources = Confirm-WslAgentResources -WslRoot $WslRoot -AllowLowResources:$AllowLowResources -Yes:$Yes
     } elseif ($registered -notcontains $DistroName) { throw "WSL distribution is not registered: $DistroName" }
     if ($Action -in 'CleanupPlan', 'Cleanup') { Invoke-WslAgentCleanup -Distro $DistroName -PlanOnly:($Action -eq 'CleanupPlan'); return }
+    if ($Action -eq 'DesktopUpdate') {
+        Write-Host "目标 / Target: $DistroName" -ForegroundColor Cyan
+        Write-Host '更新受管组件、Agent 工作浏览器入口并重新打开悬浮控件；保留浏览器页面和构建任务。' -ForegroundColor Yellow
+        if (-not $Yes -and (Read-Host '更新桌面控件？/ Apply [y/N]') -ne 'Y') { Write-Host '已取消 / Cancelled'; return }
+        $entry = Send-WslAgentBundle -Distro $DistroName
+        $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command desktop -Options @('--yes', '--json') -Timeout 0 -AllowFailure
+        try { $desktop = $result.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw "桌面更新结果无法读取 / Invalid desktop result：$($result.ErrorText)" }
+        if ($desktop.reason) { Write-Host "说明 / Reason: $($desktop.reason)" }
+        if ($desktop.log) { Write-Host "日志 / Log: $($desktop.log)" }
+        if ($result.ExitCode -ne 0 -or $desktop.state -cne 'DESKTOP_UPDATED' -or $desktop.controls_restarted -isnot [bool]) { throw "桌面更新未完成 / Incomplete：$($desktop.error) $($desktop.reason)" }
+        Write-Host "桌面更新完成 / Updated；控件已重启 / Controls restarted: $($desktop.controls_restarted)" -ForegroundColor Green
+        return
+    }
     if ($Action -eq 'Ssh') {
         Write-Host "配置 $DistroName 的密钥 SSH 与固定别名；仅实例回环监听，不开放 Windows 22。 / Key-only SSH" -ForegroundColor Yellow
         if (-not $Yes -and (Read-Host '配置并启动 SSH？/ Apply [y/N]') -ne 'Y') { return }

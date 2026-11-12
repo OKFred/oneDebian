@@ -51,6 +51,8 @@ class InstallerTests(unittest.TestCase):
         patch.start(); self.patches.append(patch)
         patch = mock.patch.object(install.runtime, 'manual', return_value=False)
         patch.start(); self.patches.append(patch)
+        patch = mock.patch.object(install, 'graphics_browser_state', return_value=('active',123))
+        patch.start(); self.patches.append(patch)
 
     def test_first_install_can_prove_d3d12_without_a_drm_render_node(self):
         cfg = {'render_node':'', 'gpu_backend':'software'}
@@ -116,6 +118,41 @@ class InstallerTests(unittest.TestCase):
                 else: self.assertEqual(install.configure_keyring(options(yes=True))['state'],state)
                 expected='empty' if state=='INITIALIZED' else 'manual'
                 self.assertEqual(install.read_json(install.ETC/'config.json')['keyring_mode'],expected)
+
+    def test_desktop_update_only_deploys_owned_assets_and_restarts_controls(self):
+        cfg={'user':'agent','home':'/home/agent','display':':11'}
+        user=types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        for restarted in (False,True):
+            install.write_json(install.ETC/'config.json',cfg)
+            with self.subTest(restarted=restarted), contextlib.ExitStack() as stack:
+                for name,value in [('require_root',None),('require_debian',None),('active',False),('prepare_changes',install)]:
+                    stack.enter_context(mock.patch.object(install,name,return_value=value))
+                stack.enter_context(mock.patch.object(install.cleanup,'_trusted'))
+                stack.enter_context(mock.patch.object(install.pwd,'getpwnam',return_value=user))
+                save=stack.enter_context(mock.patch.object(install,'save_payload'))
+                launchers=stack.enter_context(mock.patch.object(install,'desktop_launchers'))
+                controls=stack.enter_context(mock.patch.object(install,'restart_controls',return_value=restarted))
+                command=stack.enter_context(mock.patch.object(install,'run'))
+                result=install.update_desktop(options(yes=True))
+                self.assertEqual(result['state'],'DESKTOP_UPDATED')
+                self.assertIs(result['controls_restarted'],restarted)
+                save.assert_called_once();launchers.assert_called_once_with(user);controls.assert_called_once_with(cfg,user)
+                command.assert_not_called()
+
+    def test_controls_update_waits_for_a_stopped_desktop_without_starting_it(self):
+        with mock.patch.object(install,'capture',return_value='0'), mock.patch.object(install,'run') as command:
+            self.assertFalse(install.restart_controls({},None))
+        command.assert_not_called()
+
+    def test_controls_update_rejects_an_unowned_desktop_before_stopping_any_process(self):
+        unit=self.base/'unowned-desktop.service';unit.write_text('foreign desktop')
+        real_path=Path
+        def path(value,*parts):
+            return unit if str(value)=='/etc/systemd/system/onedebian-agent-desktop.service' else real_path(value,*parts)
+        with mock.patch.object(install,'capture',return_value='321'), mock.patch.object(install,'Path',side_effect=path), \
+             mock.patch.object(install.os,'kill') as signal, mock.patch.object(install,'run') as command:
+            with self.assertRaisesRegex(RuntimeError,'modified or unowned'): install.restart_controls({},None)
+        signal.assert_not_called();command.assert_not_called()
 
     def test_gpu_adjustment_records_production_proof_and_recovers_on_failure(self):
         cfg = {'user':'agent','home':'/home/agent','render_node':''}
@@ -229,12 +266,79 @@ class InstallerTests(unittest.TestCase):
         broken=mock.Mock(); broken.browser_ready.side_effect=RuntimeError('CDP unavailable')
         recovered=mock.Mock(); recovered.cdp.return_value={'targetInfos':[{'type':'page','url':'http://fixture.invalid'}]}
         module=types.SimpleNamespace(Verifier=mock.Mock(side_effect=[broken,recovered]))
-        with mock.patch.dict(sys.modules,{'verify':module}), mock.patch.object(install,'run') as command:
+        with mock.patch.dict(sys.modules,{'verify':module}), mock.patch.object(install,'run') as command, \
+             mock.patch.object(install,'graphics_browser_owned',return_value=True) as identity:
             result=install.change_graphics_browser(cfg,dict(cfg,gpu_backend='software'),None,recover=True)
         self.assertIsNone(result['page_urls_preserved'])
         self.assertEqual(module.HELPERS,install.ROOT)
         self.assertEqual(install.read_json(install.ETC/'config.json')['gpu_backend'],'software')
+        identity.assert_called_once_with(cfg,None,123)
         command.assert_any_call(['systemctl','start','onedebian-agent-chromium.service'])
+
+    def test_stopped_browser_starts_the_candidate_without_waiting_for_old_cdp(self):
+        cfg={'user':'agent','home':'/home/agent','render_node':'','gpu_backend':'software','cdp_port':19222}
+        user=types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        proof={'passed':True,'gpu':{'passed':True,'reason':'hardware shader proof'}}
+        for stopped_state in ('inactive','failed'):
+            install.write_json(install.ETC/'config.json',cfg)
+            control=mock.Mock()
+            control.cdp.return_value={'targetInfos':[{'type':'page','url':'http://restored.invalid'}]}
+            module=types.SimpleNamespace(Verifier=mock.Mock(return_value=control))
+            with self.subTest(state=stopped_state), contextlib.ExitStack() as stack:
+                for name,value in [('require_root',None),('require_debian',None),('active',False),
+                                   ('status',{'state':'READY_SOFTWARE'}),('prepare_changes',install),('save_payload',None),
+                                   ('d3d12_available',True),('probe_graphics',proof),('graphics_check',proof),('phase',None),
+                                   ('graphics_browser_state',(stopped_state,0)),('user_ctl',types.SimpleNamespace(stdout='inactive'))]:
+                    stack.enter_context(mock.patch.object(install,name,return_value=value))
+                stack.enter_context(mock.patch.object(install.cleanup,'_trusted'))
+                stack.enter_context(mock.patch.object(install.pwd,'getpwnam',return_value=user))
+                stack.enter_context(mock.patch.dict(sys.modules,{'verify':module}))
+                command=stack.enter_context(mock.patch.object(install,'run'))
+                result=install.configure_graphics(options(yes=True))
+            self.assertEqual(result['state'],'READY_GPU')
+            self.assertEqual(result['backend'],'d3d12')
+            self.assertEqual(module.Verifier.call_count,1)
+            self.assertEqual(module.Verifier.call_args.args[0]['gpu_backend'],'d3d12')
+            control.browser_ready.assert_called_once()
+            self.assertNotIn(mock.call('Browser.close'),control.cdp.call_args_list)
+            self.assertNotIn(mock.call(['systemctl','stop','onedebian-agent-chromium.service']),command.call_args_list)
+            command.assert_called_once_with(['systemctl','start','onedebian-agent-chromium.service'])
+            self.assertFalse(result['preservation']['browser_previously_running'])
+            self.assertIsNone(result['preservation']['pages_before'])
+            self.assertIsNone(result['preservation']['page_urls_preserved'])
+            self.assertEqual(result['preservation']['pages_after'],1)
+            self.assertTrue(install.read_json(install.STATE/'gpu.json')['production']['passed'])
+
+    def test_running_browser_without_cdp_is_not_blindly_stopped(self):
+        cfg={'user':'agent','home':'/home/agent','render_node':'','cdp_port':19222}
+        control=mock.Mock(); control.browser_ready.side_effect=RuntimeError('CDP unavailable')
+        module=types.SimpleNamespace(Verifier=mock.Mock(return_value=control))
+        for recover in (False,True):
+            with self.subTest(recover=recover), mock.patch.dict(sys.modules,{'verify':module}), \
+                 mock.patch.object(install,'graphics_browser_owned',return_value=False), mock.patch.object(install,'run') as command:
+                with self.assertRaisesRegex(RuntimeError,'identity could not be verified' if recover else 'CDP unavailable'):
+                    install.change_graphics_browser(cfg,dict(cfg,gpu_backend='software'),None,recover=recover)
+            command.assert_not_called()
+            self.assertFalse((install.ETC/'config.json').exists())
+
+    def test_browser_recovery_identity_requires_exact_user_profile_and_cdp_port(self):
+        import verify
+        cfg={'user':'agent','home':'/home/agent','cdp_port':19222}
+        user=types.SimpleNamespace(pw_dir='/home/agent',pw_uid=1000)
+        process=self.base/'proc/123'; process.mkdir(parents=True)
+        os.chown(process,1000,1000)
+        (process/'exe').symlink_to('/usr/lib/chromium/chromium')
+        good=b'chromium\0--user-data-dir=/home/agent/.local/share/onedebian-agent/profile\0--remote-debugging-port=19222\0'
+        real_path=Path
+        def path(*parts):
+            return process if parts==('/proc','123') else real_path(*parts)
+        for args,expected in [(good,True),(good.replace(b'\0',b' ').rstrip(),True),
+                              (good.replace(b'19222',b'19223'),False),
+                              (good.replace(b'/profile',b'/some-other-profile'),False),
+                              (good+b'--type=gpu-process\0',False),(good+b'--no-sandbox\0',False)]:
+            (process/'cmdline').write_bytes(args)
+            with self.subTest(args=args), mock.patch.object(install,'Path',side_effect=path):
+                self.assertEqual(install.graphics_browser_owned(cfg,user,123),expected)
 
     def tearDown(self):
         for patch in reversed(self.patches):

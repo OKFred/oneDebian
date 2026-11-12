@@ -5,7 +5,7 @@ the_agent_environment() {
   local -a flags=()
   local entry="$MENU_DIR/agent.sh"
   printf '\n14 Agent 环境 / Agent workstation (Debian 13)\n'
-  printf '1. 安装 / Install\n2. 继续安装 / Resume\n3. 状态 / Status\n4. 浏览器验收 / Verify browser\n5. 查看入口 / Viewer\n6. 卸载服务（保留资料）/ Uninstall services\n7. 撤销 Agent 安装（保留系统和资料） / Undo\n8. 重新检测／启用加速 / Graphics\n9. 初始化新凭据库为空密码（保留已有库） / Keyring\n10. 配置回环密钥 SSH / SSH\n0. 返回 / Back\n'
+  printf '1. 安装 / Install\n2. 继续安装 / Resume\n3. 状态 / Status\n4. 浏览器验收 / Verify browser\n5. 查看入口 / Viewer\n6. 卸载服务（保留资料）/ Uninstall services\n7. 撤销 Agent 安装（保留系统和资料） / Undo\n8. 重新检测／启用加速 / Graphics\n9. 初始化新凭据库为空密码（保留已有库） / Keyring\n10. 配置回环密钥 SSH / SSH\n11. 更新桌面控件与浏览器入口 / Desktop update\n0. 返回 / Back\n'
   read -r -p '选择 / Choice: ' choice
   case "$choice" in
     1)
@@ -79,6 +79,12 @@ the_agent_environment() {
       read -r -p '配置并启动？/ Apply [y/N]: ' answer
       [[ $answer == [yY] ]] || return 0
       bash "$entry" ssh --yes --ssh-public-key "$public_key" --ssh-port "${ssh_port:-2222}"
+      ;;
+    11)
+      printf '更新悬浮控件与 Agent 工作浏览器入口；保留浏览器页面、构建任务和桌面会话。\n'
+      read -r -p '更新桌面控件？/ Apply [y/N]: ' answer
+      [[ $answer == [yY] ]] || { printf '已取消 / Cancelled\n'; return 0; }
+      bash "$entry" desktop --yes
       ;;
     0|'') return 0 ;;
     *) printf 'Invalid choice\n'; return 1 ;;

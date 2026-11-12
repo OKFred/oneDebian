@@ -371,7 +371,7 @@ def _allowed(i, path):
              for part in ('desktop', 'chromium', 'install', 'ssh')]
     units += [BASE / 'etc/systemd/user' / ('onedebian-agent-' + part + '.service') for part in ('mcp', 'novnc')]
     launchers = [home / base / ('agent-' + part + '.desktop')
-                 for base, part in [('Desktop', 'takeover'), ('Desktop', 'resume'), ('.config/autostart', 'controls')]]
+                 for base, part in [('Desktop', 'takeover'), ('Desktop', 'resume'), ('Desktop', 'browser'), ('.config/autostart', 'controls')]]
     guards = [BASE / 'etc/systemd/system' / name / '90-onedebian-agent.conf' for name in ('ssh.service.d', 'ssh.socket.d')]
     return path in units + launchers + guards
 

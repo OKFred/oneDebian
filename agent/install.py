@@ -399,6 +399,16 @@ def unit_environment(user):
     return f'User={user.pw_name}\nEnvironment=HOME={user.pw_dir}\nEnvironment=XDG_RUNTIME_DIR=/run/user/{user.pw_uid}\nEnvironment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{user.pw_uid}/bus\n'
 
 
+def desktop_launchers(user):
+    desktop_dir = Path(user.pw_dir) / 'Desktop'
+    autostart = Path(user.pw_dir) / '.config/autostart'
+    for src in (ROOT / 'desktop').glob('*.desktop'):
+        dest = (autostart if 'control' in src.name else desktop_dir) / src.name
+        owned_file(dest, src.read_text(), 0o755, user=user)
+    for folder in (desktop_dir, autostart, autostart.parent):
+        with user_files(user): folder.mkdir(parents=True, exist_ok=True)
+
+
 def services(user):
     run(['loginctl', 'enable-linger', user.pw_name])
     run(['systemctl', 'start', f'user@{user.pw_uid}.service'])
@@ -414,13 +424,7 @@ def services(user):
         condition = f'ExecCondition={runtime} mcp-permitted\n' if name == 'mcp' else ''
         content = f'[Unit]\nDescription=oneDebian Agent {name}\n\n[Service]\n{condition}ExecStart={runtime} {name}\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=10\n\n[Install]\nWantedBy=default.target\n'
         owned_file(Path('/etc/systemd/user') / f'onedebian-agent-{name}.service', content)
-    desktop_dir = Path(user.pw_dir) / 'Desktop'
-    autostart = Path(user.pw_dir) / '.config/autostart'
-    for src in (ROOT / 'desktop').glob('*.desktop'):
-        dest = (autostart if 'control' in src.name else desktop_dir) / src.name
-        owned_file(dest, src.read_text(), 0o755, user=user)
-    for folder in (desktop_dir, autostart, autostart.parent):
-        with user_files(user): folder.mkdir(parents=True, exist_ok=True)
+    desktop_launchers(user)
     run(['systemctl', 'daemon-reload'])
     run(['systemctl', 'enable', 'onedebian-agent-desktop.service', 'onedebian-agent-chromium.service'])
     user_ctl(user, 'daemon-reload')
@@ -537,26 +541,57 @@ def probe_graphics(config, user, backend):
         if started: run(['systemctl', 'stop', unit])
 
 
+def graphics_browser_state():
+    output = capture(['systemctl', 'show', 'onedebian-agent-chromium.service', '-p', 'ActiveState', '-p', 'MainPID'])
+    fields = dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
+    if not fields.get('MainPID', '').isdecimal(): raise RuntimeError('Chromium service state could not be verified')
+    return fields.get('ActiveState', 'unknown'), int(fields['MainPID'])
+
+
+def graphics_browser_owned(config, user, pid):
+    import verify
+    if user is None or user.pw_uid == 0 or user.pw_dir != config['home'] or pid <= 0: return False
+    try:
+        process = Path('/proc', str(pid))
+        args = verify.process_args(process)
+        profile = str(Path(config['home']) / '.local/share/onedebian-agent/profile')
+        return (process.stat().st_uid == user.pw_uid and os.readlink(process / 'exe') == '/usr/lib/chromium/chromium'
+                and ('--user-data-dir=' + profile).encode() in args
+                and ('--remote-debugging-port=' + str(config['cdp_port'])).encode() in args
+                and not any(arg.startswith(b'--type=') for arg in args)
+                and b'--no-sandbox' not in args and b'--disable-setuid-sandbox' not in args)
+    except (OSError, KeyError, ValueError):
+        return False
+
+
 def change_graphics_browser(config, candidate, user, recover=False):
     if runtime.manual(config): raise RuntimeError('Manual takeover is active; the browser was retained')
     import verify
     # The repository bundle is root-private; ordinary users run the deployed helpers.
     verify.HELPERS = ROOT
-    control = verify.Verifier(config, read_json(ETC / 'versions.json'))
+    state, pid = graphics_browser_state()
+    stopped = state in ('inactive', 'failed') and pid == 0
+    previously_running = not stopped
     before = None
-    try:
-        control.browser_ready()
-        before = sorted(hashlib.sha256(item['url'].encode()).hexdigest() for item in control.cdp('Target.getTargets')['targetInfos'] if item['type'] == 'page')
-        if runtime.manual(config): raise RuntimeError('Manual takeover began; the browser was retained')
-        try: control.cdp('Browser.close')
-        except (OSError, RuntimeError, subprocess.SubprocessError): pass
-        deadline = time.monotonic() + 10
-        while Path('/proc', str(control.browser_pid)).exists() and time.monotonic() < deadline:
-            time.sleep(.2)
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        if not recover or runtime.manual(config): raise
+    if not stopped:
+        control = verify.Verifier(config, read_json(ETC / 'versions.json'))
+        try:
+            control.browser_ready()
+            before = sorted(hashlib.sha256(item['url'].encode()).hexdigest() for item in control.cdp('Target.getTargets')['targetInfos'] if item['type'] == 'page')
+            if runtime.manual(config): raise RuntimeError('Manual takeover began; the browser was retained')
+            try: control.cdp('Browser.close')
+            except (OSError, RuntimeError, subprocess.SubprocessError): pass
+            deadline = time.monotonic() + 10
+            while Path('/proc', str(control.browser_pid)).exists() and time.monotonic() < deadline:
+                time.sleep(.2)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            if not recover or runtime.manual(config): raise
+            state, pid = graphics_browser_state()
+            stopped = state in ('inactive', 'failed') and pid == 0
+            if not stopped and not graphics_browser_owned(config, user, pid):
+                raise RuntimeError('Active Chromium identity could not be verified; the browser was retained')
     if runtime.manual(config): raise RuntimeError('Manual takeover began; no further browser restart was performed')
-    run(['systemctl', 'stop', 'onedebian-agent-chromium.service'])
+    if not stopped: run(['systemctl', 'stop', 'onedebian-agent-chromium.service'])
     write_json(ETC / 'config.json', candidate)
     run(['systemctl', 'start', 'onedebian-agent-chromium.service'])
     control = verify.Verifier(candidate, read_json(ETC / 'versions.json'))
@@ -566,7 +601,8 @@ def change_graphics_browser(config, candidate, user, recover=False):
         after = sorted(hashlib.sha256(item['url'].encode()).hexdigest() for item in control.cdp('Target.getTargets')['targetInfos'] if item['type'] == 'page')
         if before is None or before == after or time.monotonic() >= deadline: break
         time.sleep(.2)
-    return dict(pages_before=len(before) if before is not None else None, pages_after=len(after), page_urls_preserved=before == after if before is not None else None)
+    return dict(browser_previously_running=previously_running, pages_before=len(before) if before is not None else None,
+                pages_after=len(after), page_urls_preserved=before == after if before is not None else None)
 
 
 def graphics_check(config, hardware):
@@ -696,6 +732,77 @@ def configure_ssh(options):
             data = ssh_setup.setup(installer, options.ssh_public_key, options.ssh_port)
             data['log'] = str(logfile)
             return data
+
+
+def restart_controls(config, user):
+    """Replace only the owned GTK process in the existing desktop namespace."""
+    import signal
+    desktop_pid = capture(['systemctl', 'show', 'onedebian-agent-desktop.service', '-p', 'MainPID', '--value'])
+    if desktop_pid == '0': return False
+    if not desktop_pid.isdecimal(): raise RuntimeError('Desktop process could not be verified')
+    unit_path = Path('/etc/systemd/system/onedebian-agent-desktop.service')
+    metadata = unit_path.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o022
+            or read_json(STATE / 'files.json', {}).get(str(unit_path)) != hashlib.sha256(unit_path.read_bytes()).hexdigest()):
+        raise RuntimeError('Desktop service is modified or unowned; no controls were stopped')
+    process = Path('/proc', desktop_pid)
+    if process.stat().st_uid != user.pw_uid or str(ROOT / 'runtime.py').encode() not in (process / 'cmdline').read_bytes().split(b'\0'):
+        raise RuntimeError('Desktop process identity differs; no controls were stopped')
+    controls = []
+    switching = False
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdecimal(): continue
+        try:
+            if entry.stat().st_uid != user.pw_uid: continue
+            args = [x for x in (entry / 'cmdline').read_bytes().split(b'\0') if x]
+            if (len(args) == 2 and args[1] == str(ROOT / 'controls.py').encode()
+                    and os.path.realpath(entry / 'exe') == os.path.realpath(sys.executable)):
+                controls.append(int(entry.name))
+            if str(ROOT / 'runtime.py').encode() in args and args[-1:] in ([b'takeover'], [b'resume']): switching = True
+        except (OSError, ValueError): continue
+    if switching: raise RuntimeError('A browser handoff is still running; retry the desktop update after it finishes')
+    unit = 'onedebian-agent-controls-refresh-' + secrets.token_hex(6) + '.service'
+    env = runtime.environment(dict(config, uid=user.pw_uid))
+    if not re.fullmatch(r':[1-9][0-9]{0,3}', env['DISPLAY']): raise RuntimeError('Invalid private desktop display')
+    keys = ('DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'HOME')
+    run(['systemd-run', '--quiet', '--collect', '--unit=' + unit, '--description=oneDebian browser controls',
+         '--property=User=' + user.pw_name, '--property=PrivateTmp=yes',
+         '--property=JoinsNamespaceOf=onedebian-agent-desktop.service',
+         '--property=Requires=onedebian-agent-desktop.service', '--property=After=onedebian-agent-desktop.service',
+         '/usr/bin/env', '-u', 'WAYLAND_DISPLAY', 'GDK_BACKEND=x11', *[key+'='+env[key] for key in keys],
+         '/usr/bin/python3', str(ROOT / 'controls.py')])
+    time.sleep(.5)
+    if not active(unit): raise RuntimeError('New controls did not start; previous controls were retained')
+    for pid in controls:
+        try: os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError: pass
+    deadline = time.monotonic() + 3
+    while any(Path('/proc', str(pid)).exists() for pid in controls):
+        if time.monotonic() >= deadline:
+            run(['systemctl', 'stop', unit])
+            raise RuntimeError('Previous controls have not exited; the duplicate new controls were stopped')
+        time.sleep(.05)
+    return True
+
+
+def update_desktop(options):
+    require_root(); require_debian()
+    if not options.yes: raise RuntimeError('Desktop component update requires --yes; only the controls window is restarted')
+    cleanup._trusted(sys.modules[__name__])
+    config = read_json(ETC / 'config.json')
+    if not config or config.get('user') != 'agent' or config.get('home') != '/home/agent': raise RuntimeError('An installed Agent workstation is required')
+    user = pwd.getpwnam('agent')
+    if user.pw_uid == 0 or user.pw_dir != config['home']: raise RuntimeError('Unexpected Agent account')
+    with operation_lock():
+        if active(): raise RuntimeError('Installation is still active; wait before updating desktop components')
+        installer = prepare_changes()
+        with cleanup_output('desktop.log') as logfile, cleanup.tracking(installer):
+            save_payload()
+            desktop_launchers(user)
+            restarted = restart_controls(config, user)
+            return dict(state='DESKTOP_UPDATED', controls_restarted=restarted, log=str(logfile),
+                        reason='Desktop components updated; browser, manual marker and build tasks retained' if restarted
+                        else 'Desktop components updated; controls will start with the next desktop session')
 
 
 def worker(options):
@@ -899,7 +1006,7 @@ def cleanup_output(name='cleanup.log'):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan', 'prepare-undo', 'prepare-wsl', 'install', 'resume', 'status', 'verify', 'uninstall', 'cleanup-plan', 'cleanup', 'gpu', 'keyring', 'ssh', '_run'])
+    parser.add_argument('action', choices=['plan', 'prepare-undo', 'prepare-wsl', 'install', 'resume', 'status', 'verify', 'uninstall', 'cleanup-plan', 'cleanup', 'gpu', 'keyring', 'ssh', 'desktop', '_run'])
     parser.add_argument('--plan-id')
     parser.add_argument('--ssh-public-key', default='')
     parser.add_argument('--ssh-port', type=int, default=2222)
@@ -930,6 +1037,7 @@ def main():
         elif options.action == 'gpu': data = configure_graphics(options)
         elif options.action == 'keyring': data = configure_keyring(options)
         elif options.action == 'ssh': data = configure_ssh(options)
+        elif options.action == 'desktop': data = update_desktop(options)
         elif options.action == '_run': worker(options); return 0
         elif options.action == 'verify':
             return subprocess.call([sys.executable, str(ROOT / 'verify.py'), *( ['--json'] if options.json else []), *extra])
@@ -963,6 +1071,7 @@ def main():
             if options.action == 'cleanup': error['log'] = str(STATE / 'cleanup.log')
             if options.action == 'gpu': error['log'] = str(STATE / 'gpu.log')
             if options.action == 'ssh': error['log'] = str(STATE / 'ssh.log')
+            if options.action == 'desktop': error['log'] = str(STATE / 'desktop.log')
             print(json.dumps(error, ensure_ascii=False))
         else: print(f'oneDebian Agent: {exc}', file=sys.stderr)
         return 1

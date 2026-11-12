@@ -1,6 +1,6 @@
 ﻿# Independent Debian Agent workstation; never implicitly targets the default WSL.
 param(
-    [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup', 'Graphics', 'Keyring', 'Ssh')][string]$Action = 'Menu',
+    [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup', 'Graphics', 'Keyring', 'Ssh', 'DesktopUpdate')][string]$Action = 'Menu',
     [string]$DistroName = '', [string]$WslRoot = 'D:\wsl',
     [ValidateSet('keep', 'tuna', 'ustc', 'official')][string]$Mirror = '',
     [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222, [int]$SshPort = 2222,
