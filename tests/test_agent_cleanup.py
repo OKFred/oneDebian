@@ -88,6 +88,16 @@ class CleanupTests(unittest.TestCase):
     def apply(self):
         return cleanup.cleanup_apply(self.i,self.plan()['plan_id'])
 
+    def test_global_ssh_guard_remains_until_ssh_package_removal_is_approved(self):
+        path=self.base/'etc/systemd/system/ssh.service.d/90-onedebian-agent.conf'
+        path.parent.mkdir(parents=True); path.write_text('[Unit]\nConditionPathExists=/fixture/opt-in\n')
+        self.i.write_json(self.i.STATE/'files.json',{str(path):hashlib.sha256(path.read_bytes()).hexdigest()})
+        plan=self.plan()
+        self.assertNotIn(str(path),[entry['path'] for entry in plan['remove_files']])
+        self.assertTrue(any(entry['path']==str(path) for entry in plan['retained']))
+        self.pkg.plan=lambda _:dict(remove=['openssh-server:amd64'],retained=[])
+        self.assertIn(str(path),[entry['path'] for entry in self.plan()['remove_files']])
+
     def test_plan_is_read_only_and_rejects_active_install_on_apply(self):
         cleanup.prepare(self.i)
         before={str(p):p.read_bytes() for p in self.i.STATE.iterdir() if p.is_file()}

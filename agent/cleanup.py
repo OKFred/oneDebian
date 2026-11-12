@@ -112,7 +112,7 @@ def _files(i):
               BASE / 'etc/apt/sources.list.d/debian.sources',
               BASE / 'etc/apt/sources.list.d/onedebian-security.list',
               home / '.bashrc', home / '.codex/config.toml']
-    result += [home / '.local/bin' / name for name in ('node', 'npm', 'npx', 'codex')]
+    result += [home / '.local/bin' / name for name in ('node', 'npm', 'npx', 'pnpm', 'codex')]
     result += [i.ETC / name for name in ('config.json', 'versions.json', 'node-version')]
     result += [i.STATE / 'downloads' / asset for asset, digest in getattr(i, 'FNM', {}).values()]
     source_dir = BASE / 'etc/apt/sources.list.d'
@@ -368,11 +368,12 @@ def _allowed(i, path):
     if path in _files(i) or any(path.is_relative_to(tree) for tree in _trees()):
         return True
     units = [BASE / 'etc/systemd/system' / ('onedebian-agent-' + part + '.service')
-             for part in ('desktop', 'chromium', 'install')]
+             for part in ('desktop', 'chromium', 'install', 'ssh')]
     units += [BASE / 'etc/systemd/user' / ('onedebian-agent-' + part + '.service') for part in ('mcp', 'novnc')]
     launchers = [home / base / ('agent-' + part + '.desktop')
                  for base, part in [('Desktop', 'takeover'), ('Desktop', 'resume'), ('.config/autostart', 'controls')]]
-    return path in units + launchers
+    guards = [BASE / 'etc/systemd/system' / name / '90-onedebian-agent.conf' for name in ('ssh.service.d', 'ssh.socket.d')]
+    return path in units + launchers + guards
 
 
 def _bashrc_restore(before, after, current):
@@ -484,7 +485,7 @@ def cleanup_plan(i):
             plan['restore_files'].append(dict(path=name, expected=_token(current), target=before['target'], mode=before['mode']))
         else:
             plan['retained'].append(dict(path=name, reason='Original non-file requires manual restoration'))
-    for part in ('desktop', 'chromium', 'install', 'mcp', 'novnc'):
+    for part in ('desktop', 'chromium', 'install', 'ssh', 'mcp', 'novnc'):
         user = part in ('mcp', 'novnc')
         path = BASE / ('etc/systemd/user' if user else 'etc/systemd/system') / ('onedebian-agent-' + part + '.service')
         current = _fingerprint(path)
@@ -515,6 +516,11 @@ def cleanup_plan(i):
                 else:
                     plan['account_changes']['disable_linger'] = True
     plan['packages'] = _package_plan(i)
+    if not any(name.split(':')[0] == 'openssh-server' for name in plan['packages'].get('remove', [])):
+        guards = {str(BASE / 'etc/systemd/system' / name / '90-onedebian-agent.conf') for name in ('ssh.service.d', 'ssh.socket.d')}
+        kept = [entry for entry in plan['remove_files'] if entry['path'] in guards]
+        plan['remove_files'] = [entry for entry in plan['remove_files'] if entry['path'] not in guards]
+        plan['retained'] += [dict(path=entry['path'], reason='Global SSH guard retained because SSH package removal was not approved') for entry in kept]
     plan['blockers'] += plan['packages'].get('blockers', plan['packages'].get('blocked', []))
     _merge_package_result(plan, plan['packages'])
     canonical = json.dumps(plan, sort_keys=True, separators=(',', ':')).encode()

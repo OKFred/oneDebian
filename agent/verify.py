@@ -12,6 +12,7 @@ import pwd
 import re
 import selectors
 import signal
+import stat
 import subprocess
 import struct
 import sys
@@ -21,7 +22,11 @@ import urllib.parse
 import urllib.request
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from runtime import gpu_backend, graphics_environment
+
 CONFIG = Path('/etc/onedebian-agent/config.json')
+PROBE_CONFIG = Path('/run/onedebian-agent-gpu/config.json')
 VERSIONS = Path('/etc/onedebian-agent/versions.json')
 HELPERS = Path(__file__).resolve().parent
 SOFTWARE = re.compile(r'llvmpipe|softpipe|swiftshader|lavapipe|software|\bwarp\b|basic render|virgl|svga3d', re.I)
@@ -60,6 +65,40 @@ def need(condition, message):
 
 def hardware_renderer(value):
     return bool(value and value.strip() and not SOFTWARE.search(value))
+
+
+def d3d12_renderer(value):
+    return hardware_renderer(value) and bool(re.search(r'\bD3D12\s*\(\s*Intel\b', value, re.I))
+
+
+def d3d12_evidence(process):
+    fds = []
+    for fd in (process / 'fd').iterdir():
+        try:
+            if os.path.realpath(fd) == '/dev/dxg':
+                fds.append(fd.name)
+        except OSError:
+            continue
+    libraries = sorted({line.split()[-1] for line in (process / 'maps').read_text().splitlines()
+                        if line.split() and Path(line.split()[-1]).name in {'libd3d12.so','libdxcore.so'}})
+    return dict(device='/dev/dxg',fds=fds,libraries=libraries,
+                passed=bool(fds and {'libd3d12.so','libdxcore.so'} <= {Path(path).name for path in libraries}))
+
+
+def probe_config():
+    for path in (PROBE_CONFIG.parent, PROBE_CONFIG):
+        info = path.lstat()
+        need(info.st_uid == 0 and not info.st_mode & 0o022 and
+             (stat.S_ISDIR(info.st_mode) if path == PROBE_CONFIG.parent else stat.S_ISREG(info.st_mode)),
+             'Untrusted GPU probe configuration')
+    need(PROBE_CONFIG.stat().st_size <= 65536, 'GPU probe configuration is too large')
+    config = json.loads(PROBE_CONFIG.read_text())
+    need(config.get('probe_unit') == 'onedebian-agent-gpu-probe.service', 'Invalid GPU probe service')
+    base = Path(config['home']) / '.local/share/onedebian-agent/probes'
+    profile = Path(config.get('probe_profile',''))
+    need(profile.is_absolute() and profile != base and profile.resolve().is_relative_to(base.resolve()),
+         'GPU probe must use a temporary profile')
+    return config
 
 
 class NoControlRedirects(urllib.request.HTTPRedirectHandler):
@@ -160,8 +199,10 @@ def session_boot_id(proc=Path('/proc')):
     return str(uuid.uuid5(uuid.NAMESPACE_OID,kernel + ':' + start))
 
 
-def native_egl(render_node):
-    """Owned native ES2 context, shader draw and exact render-node FD evidence."""
+def native_egl(render_node='', backend='drm'):
+    """Owned native ES2 shader draw with evidence for the selected backend."""
+    gpu_backend(dict(gpu_backend=backend, render_node=render_node))
+    need(backend != 'software', 'Native GPU proof requires a hardware backend')
     P, I, U, F = ctypes.c_void_p, ctypes.c_int, ctypes.c_uint, ctypes.c_float
     egl = ctypes.CDLL('libEGL.so.1'); gl = ctypes.CDLL('libGLESv2.so.2')
     def bind(lib, name, restype, argtypes):
@@ -186,7 +227,8 @@ def native_egl(render_node):
         need(context and surface and current(display,surface,surface,context), 'EGL make-current failed')
         get_string = bind(gl,'glGetString',ctypes.c_char_p,[U])
         renderer = (get_string(0x1F01) or b'').decode(errors='replace')
-        need(hardware_renderer(renderer), 'Native EGL is using software rendering: ' + renderer)
+        need(d3d12_renderer(renderer) if backend == 'd3d12' else hardware_renderer(renderer),
+             'Native EGL is using software or the wrong GPU backend: ' + renderer)
         create = bind(gl,'glCreateShader',U,[U]); source = bind(gl,'glShaderSource',None,[U,I,ctypes.POINTER(ctypes.c_char_p),ctypes.POINTER(I)])
         compile_shader = bind(gl,'glCompileShader',None,[U]); shader_ok = bind(gl,'glGetShaderiv',None,[U,U,ctypes.POINTER(I)])
         shaders = []
@@ -212,15 +254,15 @@ def native_egl(render_node):
         pixel = (ctypes.c_ubyte * 4)()
         bind(gl,'glReadPixels',None,[I,I,I,I,U,U,P])(4,4,1,1,0x1908,0x1401,pixel)
         need(bind(gl,'glGetError',U,[])() == 0 and list(pixel) == [0,255,0,255], 'Native EGL shader readback failed')
-        fds = []
-        for fd in Path('/proc/self/fd').iterdir():
-            try:
-                if os.path.realpath(fd) == render_node:
-                    fds.append(fd.name)
-            except OSError:
-                continue
-        need(fds, 'Native EGL did not open the selected render node')
-        return dict(passed=True, renderer=renderer, render_node=render_node, fds=fds, pixel=list(pixel), egl=f'{major.value}.{minor.value}')
+        if backend == 'd3d12':
+            evidence = d3d12_evidence(Path('/proc/self'))
+            need(evidence['passed'], 'Native EGL lacks DXG and D3D12/DXCore evidence')
+        else:
+            fds = [fd.name for fd in Path('/proc/self/fd').iterdir() if os.path.realpath(fd) == render_node]
+            need(fds, 'Native EGL did not open the selected render node')
+            evidence = dict(fds=fds)
+        return dict(evidence, passed=True, backend=backend, renderer=renderer, render_node=render_node,
+                    pixel=list(pixel), egl=f'{major.value}.{minor.value}')
     finally:
         if display:
             current(display,None,None,None)
@@ -244,6 +286,7 @@ class Verifier:
         self.env = dict(PATH='/usr/local/bin:/usr/bin:/bin', HOME=str(self.home), USER=account.pw_name,
             LOGNAME=account.pw_name, XDG_RUNTIME_DIR=str(self.run), DBUS_SESSION_BUS_ADDRESS=f'unix:path={self.run}/bus',
             DISPLAY=config.get('display',':10'), XAUTHORITY=str(self.run / 'onedebian-agent/Xauthority'))
+        self.env.update(graphics_environment(config))
         self.report = dict(passed=False, checks=[], browser_input_issued=False,
                            hardware_required=False, warnings=[],
                            manual_checks={'noVNC_picture_and_keyboard':'not_yet_verified',
@@ -294,7 +337,13 @@ class Verifier:
         interactive = self.user(['/bin/bash','-ic','node --version']).stdout.strip().splitlines()[-1]
         wrapper = self.user([str(self.home / '.local/bin/node'),'--version']).stdout.strip()
         need(noninteractive == interactive == wrapper == expected, 'Interactive/noninteractive/wrapper fnm Node version mismatch')
-        return dict(expected=expected,interactive=interactive,noninteractive=noninteractive,wrapper=wrapper)
+        result = dict(expected=expected,interactive=interactive,noninteractive=noninteractive,wrapper=wrapper)
+        if self.versions.get('pnpm'):
+            pnpm = self.user([str(self.home / '.local/bin/pnpm'), '--version']).stdout.strip()
+            shell = self.user(['/bin/bash', '-ic', 'pnpm --version']).stdout.strip().splitlines()[-1]
+            need(pnpm == shell == self.versions['pnpm'], 'Recorded global pnpm version mismatch')
+            result['pnpm'] = pnpm
+        return result
 
     def service_check(self):
         result = {}
@@ -374,7 +423,10 @@ class Verifier:
         result = self.cdp('SystemInfo.getInfo')['gpu']
         renderer = result.get('auxAttributes',{}).get('glRenderer','')
         profile = self.cfg.get('probe_profile') or str(self.data / 'profile')
-        main = subprocess.run(['systemctl','show','onedebian-agent-chromium.service','-p','MainPID','--value'],
+        unit = self.cfg.get('probe_unit','onedebian-agent-chromium.service')
+        need(unit in {'onedebian-agent-chromium.service','onedebian-agent-gpu-probe.service'}, 'Invalid Chromium service')
+        need(unit != 'onedebian-agent-gpu-probe.service' or self.cfg.get('probe_profile'), 'GPU probe profile is missing')
+        main = subprocess.run(['systemctl','show',unit,'-p','MainPID','--value'],
                               capture_output=True,text=True,check=True,timeout=10)
         pid = int(main.stdout.strip()); need(pid > 0,'Chromium service has no main process')
         process = proc / str(pid)
@@ -406,18 +458,20 @@ class Verifier:
 
     def gpu_check(self):
         node = self.cfg.get('render_node','')
-        gpu = dict(passed=False,reason='',renderer='',render_node=node,evidence={})
+        backend = gpu_backend(self.cfg)
+        gpu = dict(passed=False,reason='',backend=backend,renderer='',render_node=node,evidence={})
         self.report['gpu'] = gpu
         try:
             need(not self.manual(), 'Browser automation paused by manual takeover')
-            need(re.fullmatch(r'/dev/dri/renderD\d+',node),
-                 '/dev/dxg alone is not a DRM render node; software fallback' if Path('/dev/dxg').exists() else 'No selected DRM render node; software fallback')
-            need(Path(node).exists(), 'Selected DRM render node is absent')
+            need(backend != 'software',
+                 '/dev/dxg alone does not prove acceleration; software fallback' if Path('/dev/dxg').exists() else 'No selected GPU backend; software fallback')
+            need(Path('/dev/dxg' if backend == 'd3d12' else node).exists(), 'Selected GPU device is absent')
             need(hasattr(self,'browser_pid'), 'Owned Chromium process has not been verified')
             # The native probe must enter the desktop mount namespace; never replace WSLg sockets.
             services = subprocess.run(['systemctl','show','onedebian-agent-desktop.service','-p','MainPID','--value'],capture_output=True,text=True,check=True,timeout=10)
             pid = int(services.stdout.strip()); need(pid > 0,'Desktop service is not running')
-            worker = ['/usr/bin/python3',str(Path(__file__).resolve()),'--egl-worker','--render-node',node]
+            worker = ['/usr/bin/python3',str(Path(__file__).resolve()),'--egl-worker','--gpu-backend',backend]
+            if backend == 'drm': worker += ['--render-node',node]
             if os.geteuid() == 0:
                 command = ['nsenter','--target',str(pid),'--mount','--'] + self.user_command(worker)
             else:
@@ -428,8 +482,11 @@ class Verifier:
             need(native.returncode == 0 and proof.get('passed'), 'Native EGL proof failed: ' + proof.get('error','unknown failure'))
             info = self.cdp('SystemInfo.getInfo')['gpu']; gpu['renderer'] = info.get('auxAttributes',{}).get('glRenderer','')
             gpu['evidence']['feature_status'] = info.get('featureStatus',{})
-            need(hardware_renderer(gpu['renderer']), 'Chromium GPU renderer is software or unknown')
-            for feature in ['gpu_compositing','webgl','webgl2']:
+            renderer_check = d3d12_renderer if backend == 'd3d12' else hardware_renderer
+            need(renderer_check(gpu['renderer']), 'Chromium GPU renderer is software or the wrong backend')
+            features = info.get('featureStatus',{})
+            # New Chromium combines the WebGL feature status; WebGL2 still needs its own shader draw below.
+            for feature in ['gpu_compositing','webgl'] + (['webgl2'] if 'webgl2' in features else []):
                 need(str(info.get('featureStatus',{}).get(feature,'')).startswith('enabled'), 'Chromium hardware feature not enabled: ' + feature)
             need(not self.manual(), 'Browser automation paused by manual takeover')
             target = self.cdp('Target.createTarget',{'url':'about:blank'})['targetId']
@@ -441,13 +498,15 @@ class Verifier:
                 need('exceptionDetails' not in evaluation,'WebGL draw raised an exception')
                 draws = evaluation['result']['value']; gpu['evidence']['webgl_draws'] = draws
                 for version in ['webgl','webgl2']:
-                    need(draws[version].get('passed') and hardware_renderer(draws[version].get('renderer','')),
+                    need(draws[version].get('passed') and renderer_check(draws[version].get('renderer','')),
                          version + ' hardware shader draw/readback failed')
-                gpu['evidence']['chromium_gpu_fds'] = gpu_process_fds(self.browser_pid,self.uid,node)
-                need(gpu['evidence']['chromium_gpu_fds'], 'Chromium GPU process lacks an FD for the exact selected render node')
+                gpu['evidence']['chromium_gpu_fds'] = gpu_process_fds(self.browser_pid,self.uid,node,backend=backend)
+                need(gpu['evidence']['chromium_gpu_fds'], 'Chromium GPU process lacks ' +
+                     ('DXG and D3D12/DXCore evidence' if backend == 'd3d12' else 'an FD for the exact selected render node'))
             finally:
                 self.cdp('Target.closeTarget',{'targetId':target})
-            gpu.update(passed=True,reason='Native EGL, Chromium exact-node FD, WebGL1 and WebGL2 hardware shader drawing passed')
+            gpu.update(passed=True,reason='Native EGL, Chromium ' + ('DXG/D3D12 evidence' if backend == 'd3d12' else 'exact-node FD') +
+                       ', WebGL1 and WebGL2 hardware shader drawing passed')
             return gpu
         except Exception as error:
             gpu['reason'] = str(error)
@@ -542,12 +601,16 @@ def descendants(root_pid, proc=Path('/proc')):
     return sorted(found)
 
 
-def gpu_process_fds(browser_pid, uid, render_node, proc=Path('/proc')):
+def gpu_process_fds(browser_pid, uid, render_node, proc=Path('/proc'), backend='drm'):
     result = []
     for pid in descendants(browser_pid,proc):
         process = proc / str(pid)
         try:
             if process.stat().st_uid != uid or b'--type=gpu-process' not in process_args(process):
+                continue
+            if backend == 'd3d12':
+                evidence = d3d12_evidence(process)
+                if evidence['passed']: result.append(dict(pid=pid,**evidence))
                 continue
             for fd in (process / 'fd').iterdir():
                 try:
@@ -567,14 +630,19 @@ def main(argv=None):
     parser.add_argument('--json',action='store_true')
     parser.add_argument('--egl-worker',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--render-node',help=argparse.SUPPRESS)
+    parser.add_argument('--gpu-backend',choices=['drm','d3d12'],default='drm',help=argparse.SUPPRESS)
+    parser.add_argument('--probe-config',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
         if args.egl_worker:
-            need(args.render_node and re.fullmatch(r'/dev/dri/renderD\d+',args.render_node),'Invalid render node')
+            gpu_backend(dict(gpu_backend=args.gpu_backend,render_node=args.render_node or ''))
             account = pwd.getpwnam(json.loads(CONFIG.read_text())['user'])
             need(os.geteuid() != 0 and os.geteuid() == account.pw_uid,'Run the native EGL worker as the ordinary agent user')
-            print(json.dumps(native_egl(args.render_node))); return 0
-        verifier = Verifier(json.loads(CONFIG.read_text()),json.loads(VERSIONS.read_text()))
+            print(json.dumps(native_egl(args.render_node or '',args.gpu_backend))); return 0
+        need(not args.probe_config or (args.gpu and not args.browser), 'Temporary GPU probes only support --gpu')
+        config = probe_config() if args.probe_config else json.loads(CONFIG.read_text())
+        need(args.probe_config or not config.get('probe_unit'), 'A probe service is not a production browser')
+        verifier = Verifier(config,json.loads(VERSIONS.read_text()))
         # Initial GPU trials deliberately run no MCP/viewer against the temporary profile.
         if not args.gpu or args.browser:
             for name,action in [('fnm Node runtime',verifier.version_check),

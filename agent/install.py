@@ -26,10 +26,12 @@ STATE = Path('/var/lib/onedebian-agent')
 JOB = 'onedebian-agent-install.service'
 OWNER = 'oneDebian-agent-v1'
 SOURCE = Path(__file__).resolve().parent
+GPU_PROBE = Path('/run/onedebian-agent-gpu')
 sys.path.insert(0, str(SOURCE))
 import cleanup
 import package_undo
-VERSIONS = dict(node='v26.13.0', fnm='v1.39.0', mcp='0.0.83', codex='0.166.0')
+import runtime
+VERSIONS = dict(node='v26.13.0', fnm='v1.39.0', mcp='0.0.83', codex='0.166.0', pnpm='12.18.0')
 FNM = {
     'amd64': ('fnm-linux.zip', '7807664f39d39fc518da1c35ba0181e4b3267603c4b1dedeb4b5fc6ae440a224'),
     'arm64': ('fnm-arm64.zip', '4eaff58b2c5bf30d0934027572dd0b5bbb60d2a1af309230b53662d4b1d45599'),
@@ -114,7 +116,7 @@ def status():
     data['config'] = read_json(ETC / 'config.json', {})
     data['versions'] = read_json(ETC / 'versions.json', {})
     if data['versions']:
-        data['first_use'] = '首次浏览网页前，请在桌面完成 keyring 设置或解锁；Codex 账号也需首次授权。'
+        data['first_use'] = 'Windows Codex 可直接使用本机转发的 MCP，无需 Linux Codex 授权；已有加密 keyring 仍需自行解锁。'
     return data
 
 
@@ -212,7 +214,7 @@ def config_for(options):
     display = next((f':{n}' for n in range(10, 1000) if str(n) not in used), None)
     if display is None: raise RuntimeError('No unused private X display number is available')
     return dict(user='agent', home='/home/agent', display=display, viewer_port=options.viewer_port,
-                mcp_port=options.mcp_port, cdp_port=options.cdp_port, render_node='')
+                mcp_port=options.mcp_port, cdp_port=options.cdp_port, render_node='', gpu_backend='software', keyring_mode='empty')
 
 
 def plan(options):
@@ -359,6 +361,9 @@ def install_runtime(user):
     as_user(user, [*fnm, 'default', VERSIONS['node']])
     version = as_user(user, [*fnm, 'exec', '--using=' + VERSIONS['node'], 'node', '--version'], capture_output=True, text=True).stdout.strip()
     if version != VERSIONS['node']: raise RuntimeError(f'Unexpected Node runtime: {version}')
+    as_user(user, [*fnm, 'exec', '--using=' + version, 'npm', 'install', '--global', 'pnpm@' + VERSIONS['pnpm']])
+    pnpm = as_user(user, [*fnm, 'exec', '--using=' + version, 'pnpm', '--version'], capture_output=True, text=True).stdout.strip()
+    if pnpm != VERSIONS['pnpm']: raise RuntimeError('Unexpected global pnpm version: ' + pnpm)
     tools = data / 'tools'
     as_user(user, [*fnm, 'exec', '--using=' + version, 'npm', 'install', '--prefix', str(tools),
                    '--save-exact', '@playwright/mcp@' + VERSIONS['mcp'], '@openai/codex@' + VERSIONS['codex']])
@@ -371,7 +376,7 @@ def install_runtime(user):
         with user_files(user):
             prefix = marker + '\nexport FNM_DIR="$HOME/.local/share/fnm"\nexport PATH="$HOME/.local/bin:$FNM_DIR:$PATH"\n'
             atomic(shell, prefix + content + '\nif [[ $- == *i* ]]; then eval "$("$FNM_DIR/fnm" env --use-on-cd --shell bash)"; fi\n')
-    for name in ('node', 'npm', 'npx', 'codex'):
+    for name in ('node', 'npm', 'npx', 'pnpm', 'codex'):
         binary = name
         command = ['node', str(tools / 'node_modules/@openai/codex/bin/codex.js')] if name == 'codex' else [binary]
         import shlex
@@ -448,13 +453,17 @@ def gpu_access(user, node):
     return group
 
 
+def d3d12_available():
+    return Path('/dev/dxg').is_char_device() and all(Path('/usr/lib/wsl/lib', name).is_file() for name in ('libd3d12.so', 'libdxcore.so'))
+
+
 def verify_gpu(config, user):
     # First installation only: production profile has not been launched yet.
     candidates = sorted(Path('/dev/dri').glob('renderD*'))
     evidence = []
     for node in candidates:
         granted_group = None
-        candidate = dict(config, render_node=str(node), probe_profile=str(Path(user.pw_dir) / '.local/share/onedebian-agent/probes/gpu'))
+        candidate = dict(config, gpu_backend='drm', render_node=str(node), probe_profile=str(Path(user.pw_dir) / '.local/share/onedebian-agent/probes/gpu'))
         try:
             granted_group = gpu_access(user, node)
             write_json(ETC / 'config.json', candidate)
@@ -468,14 +477,225 @@ def verify_gpu(config, user):
         evidence.append(data)
         if proof is not None and proof.returncode == 0 and data.get('gpu', {}).get('passed'):
             config['render_node'] = str(node)
+            config['gpu_backend'] = 'drm'
             break
         if granted_group:
             run(['systemctl', 'stop', 'onedebian-agent-chromium.service', 'onedebian-agent-desktop.service'])
             run(['gpasswd', '-d', user.pw_name, granted_group])
-    write_json(STATE / 'gpu.json', dict(attempts=evidence, mode='gpu' if config['render_node'] else 'software',
-               reason=None if candidates else 'No DRM render node; /dev/dxg alone is not a DRI3 device'))
+    if not config['render_node'] and d3d12_available():
+        write_json(ETC / 'config.json', dict(config, gpu_backend='software'))
+        run(['systemctl', 'restart', 'onedebian-agent-desktop.service'])
+        trial = probe_graphics(config, user, 'd3d12')
+        evidence.append(trial)
+        if trial.get('passed') and trial.get('gpu', {}).get('passed'):
+            config['gpu_backend'] = 'd3d12'
+    backend = runtime.gpu_backend(config)
+    write_json(STATE / 'gpu.json', dict(attempts=evidence, mode='software' if backend == 'software' else 'gpu', backend=backend,
+               reason=None if backend != 'software' else 'No candidate passed native EGL and Chromium hardware shader drawing'))
     subprocess.run(['systemctl', 'stop', 'onedebian-agent-chromium.service', 'onedebian-agent-desktop.service'], check=False)
     write_json(ETC / 'config.json', config)
+
+
+def probe_graphics(config, user, backend):
+    """A separate browser/profile in the current desktop, never the production profile."""
+    directory = GPU_PROBE
+    if directory.is_symlink(): raise RuntimeError('Unsafe GPU probe directory')
+    if directory.exists():
+        info = directory.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022 or not (directory / '.owner').is_file() or (directory / '.owner').read_text() != OWNER:
+            raise RuntimeError('Unowned GPU probe directory')
+    directory.mkdir(mode=0o755, exist_ok=True)
+    atomic(directory / '.owner', OWNER)
+    unit = 'onedebian-agent-gpu-probe.service'
+    state = capture(['systemctl', 'show', unit, '-p', 'LoadState', '--value'])
+    if state != 'not-found': return dict(passed=False, gpu=dict(passed=False, backend=backend, reason='Existing GPU probe unit was retained; review it before retrying'))
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0)); port = listener.getsockname()[1]
+    candidate = dict(config, gpu_backend=backend, cdp_port=port, probe_unit=unit,
+        uid=user.pw_uid, probe_profile=str(Path(user.pw_dir) / '.local/share/onedebian-agent/probes' / ('gpu-' + secrets.token_hex(12))))
+    runtime.gpu_backend(candidate)
+    write_json(directory / 'config.json', candidate, 0o600)
+    launcher = 'import sys\nsys.path.insert(0, ' + repr(str(ROOT)) + ')\nimport runtime\nruntime.chromium(' + repr(candidate) + ')\n'
+    atomic(directory / 'launch.py', launcher)
+    started = False
+    try:
+        run(['systemd-run', '--quiet', '--collect', '--unit=' + unit,
+             '--property=User=' + user.pw_name, '--property=PrivateTmp=yes',
+             '--property=JoinsNamespaceOf=onedebian-agent-desktop.service',
+             '--property=Requires=onedebian-agent-desktop.service',
+             '--property=After=onedebian-agent-desktop.service',
+             '/usr/bin/python3', str(directory / 'launch.py')])
+        started = True
+        result = subprocess.run(['python3', str(ROOT / 'verify.py'), '--gpu', '--probe-config', '--json'],
+                                capture_output=True, text=True, timeout=180)
+        data = json.loads(result.stdout)
+        if result.returncode: data['passed'] = False
+        return data
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return dict(passed=False, gpu=dict(passed=False, backend=backend, reason=str(error)))
+    finally:
+        if started: run(['systemctl', 'stop', unit])
+
+
+def change_graphics_browser(config, candidate, user, recover=False):
+    if runtime.manual(config): raise RuntimeError('Manual takeover is active; the browser was retained')
+    import verify
+    # The repository bundle is root-private; ordinary users run the deployed helpers.
+    verify.HELPERS = ROOT
+    control = verify.Verifier(config, read_json(ETC / 'versions.json'))
+    before = None
+    try:
+        control.browser_ready()
+        before = sorted(hashlib.sha256(item['url'].encode()).hexdigest() for item in control.cdp('Target.getTargets')['targetInfos'] if item['type'] == 'page')
+        if runtime.manual(config): raise RuntimeError('Manual takeover began; the browser was retained')
+        try: control.cdp('Browser.close')
+        except (OSError, RuntimeError, subprocess.SubprocessError): pass
+        deadline = time.monotonic() + 10
+        while Path('/proc', str(control.browser_pid)).exists() and time.monotonic() < deadline:
+            time.sleep(.2)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        if not recover or runtime.manual(config): raise
+    if runtime.manual(config): raise RuntimeError('Manual takeover began; no further browser restart was performed')
+    run(['systemctl', 'stop', 'onedebian-agent-chromium.service'])
+    write_json(ETC / 'config.json', candidate)
+    run(['systemctl', 'start', 'onedebian-agent-chromium.service'])
+    control = verify.Verifier(candidate, read_json(ETC / 'versions.json'))
+    control.browser_ready()
+    deadline = time.monotonic() + 20
+    while True:
+        after = sorted(hashlib.sha256(item['url'].encode()).hexdigest() for item in control.cdp('Target.getTargets')['targetInfos'] if item['type'] == 'page')
+        if before is None or before == after or time.monotonic() >= deadline: break
+        time.sleep(.2)
+    return dict(pages_before=len(before) if before is not None else None, pages_after=len(after), page_urls_preserved=before == after if before is not None else None)
+
+
+def graphics_check(config, hardware):
+    if hardware:
+        result = subprocess.run(['python3', str(ROOT / 'verify.py'), '--gpu', '--json'], capture_output=True, text=True, timeout=180)
+        data = json.loads(result.stdout)
+        if result.returncode: data['passed'] = False
+        return data
+    import verify
+    verify.HELPERS = ROOT
+    control = verify.Verifier(config, read_json(ETC / 'versions.json'))
+    control.browser_ready()
+    renderer = control.cdp('SystemInfo.getInfo')['gpu'].get('auxAttributes', {}).get('glRenderer', '')
+    if not renderer or verify.hardware_renderer(renderer): raise RuntimeError('Software fallback renderer was not confirmed')
+    return dict(passed=True, gpu=dict(backend='software', renderer=renderer))
+
+
+def configure_graphics(options):
+    require_root(); require_debian()
+    if not options.yes: raise RuntimeError('GPU adjustment requires confirmation with --yes; Chromium may restart')
+    cleanup._trusted(sys.modules[__name__])
+    config = read_json(ETC / 'config.json')
+    if not config or config.get('user') != 'agent' or config.get('home') != '/home/agent': raise RuntimeError('An installed Agent workstation is required')
+    user = pwd.getpwnam('agent')
+    if user.pw_uid == 0 or user.pw_dir != config['home']: raise RuntimeError('Unexpected Agent account')
+    if runtime.manual(config): raise RuntimeError('Manual takeover is active; hand the browser back before GPU adjustment')
+    with operation_lock():
+        current_state = status()['state']
+        previous_gpu = read_json(STATE / 'gpu.json', {})
+        retry = (current_state == 'ERROR' and read_json(STATE / 'installed.json', {}).get('owner') == OWNER
+                 and previous_gpu.get('operation') == 'graphics' and previous_gpu.get('result_state') == 'ERROR')
+        if active() or not (current_state.startswith('READY_') or retry): raise RuntimeError('Finish the current installation or cleanup before GPU adjustment')
+        installer = prepare_changes()
+        with cleanup_output('gpu.log') as logfile, cleanup.tracking(installer):
+            save_payload()
+            backend = 'd3d12' if d3d12_available() else runtime.gpu_backend(config)
+            trial = probe_graphics(config, user, backend) if backend != 'software' else dict(passed=False, gpu=dict(reason='No DXG device or previously selected DRM backend'))
+            proven = trial.get('passed') and trial.get('gpu', {}).get('passed')
+            candidate = dict(config, gpu_backend=backend if proven else 'software', render_node=config.get('render_node', '') if proven and backend == 'drm' else '')
+            reason = trial.get('gpu', {}).get('reason', 'Hardware verification failed')
+            if runtime.manual(config): raise RuntimeError('Manual takeover began during the probe; production browser was retained')
+            mcp = user_ctl(user, 'show', 'onedebian-agent-mcp.service', '-p', 'ActiveState', '--value', capture_output=True, text=True).stdout.strip() == 'active'
+            preservation = {}; actual = None; fallback_proof = None; tabs_lost = False
+            state = 'ERROR'
+            if mcp: user_ctl(user, 'stop', 'onedebian-agent-mcp.service')
+            try:
+                preservation = change_graphics_browser(config, candidate, user)
+                if preservation.get('page_urls_preserved') is False:
+                    tabs_lost = True
+                    raise RuntimeError('Browser tabs did not restore; see GPU log before continuing')
+                actual = graphics_check(candidate, proven)
+                if not actual.get('passed'):
+                    raise RuntimeError('Production verification failed: ' + actual.get('gpu', {}).get('reason', actual.get('error', 'see gpu.json')))
+                if runtime.manual(config): raise RuntimeError('Manual takeover began during production verification; the browser was retained')
+                state = 'READY_GPU' if proven else 'READY_SOFTWARE'
+            except Exception as error:
+                reason = str(error)
+                print('GPU adjustment failed: ' + reason, file=sys.stderr, flush=True)
+                if runtime.manual(config):
+                    reason = 'Manual takeover interrupted GPU adjustment; the browser was retained: ' + reason
+                else:
+                    try:
+                        candidate = dict(config, gpu_backend='software', render_node='')
+                        preservation = change_graphics_browser(read_json(ETC / 'config.json'), candidate, user, recover=True)
+                        tabs_lost = tabs_lost or preservation.get('page_urls_preserved') is False
+                        fallback_proof = graphics_check(candidate, False)
+                        if not fallback_proof.get('passed'): raise RuntimeError('Software fallback verification did not pass')
+                        if runtime.manual(config): raise RuntimeError('Manual takeover began during software recovery; the browser was retained')
+                        if tabs_lost: raise RuntimeError('Browser tabs did not restore; software recovery needs review')
+                        proven = False
+                        state = 'READY_SOFTWARE'
+                        reason += '; verified software fallback'
+                    except Exception as fallback_error:
+                        reason += '; recovery incomplete: ' + str(fallback_error)
+                        print(reason, file=sys.stderr, flush=True)
+            finally:
+                if mcp and not runtime.manual(config):
+                    try: user_ctl(user, 'start', 'onedebian-agent-mcp.service')
+                    except (OSError, RuntimeError, subprocess.SubprocessError) as mcp_error:
+                        state = 'ERROR'
+                        reason += '; MCP reconnection failed: ' + str(mcp_error)
+            backend = runtime.gpu_backend(read_json(ETC / 'config.json')) if state == 'ERROR' else candidate['gpu_backend']
+            record = dict(operation='graphics', result_state=state, backend=backend,
+                          mode='gpu' if state == 'READY_GPU' else 'software' if state == 'READY_SOFTWARE' else 'unverified',
+                          attempts=[trial], production=actual, fallback=fallback_proof, reason=reason, preservation=preservation)
+            write_json(STATE / 'gpu.json', record)
+            phase(state, reason if state == 'ERROR' else None)
+            return dict(state=state, backend=backend, reason=reason, preservation=preservation, log=str(logfile))
+
+
+def configure_keyring(options):
+    require_root(); require_debian()
+    if not options.yes: raise RuntimeError('Confirm --yes to initialize only a new keyring with an empty password')
+    cleanup._trusted(sys.modules[__name__])
+    config = read_json(ETC / 'config.json')
+    if not config or config.get('user') != 'agent' or config.get('home') != '/home/agent': raise RuntimeError('An installed Agent workstation is required')
+    user = pwd.getpwnam('agent')
+    if user.pw_uid == 0 or user.pw_dir != config['home']: raise RuntimeError('Unexpected Agent account')
+    with operation_lock():
+        if active(): raise RuntimeError('Installation is still active; wait before keyring repair')
+        installer = prepare_changes()
+        with cleanup.tracking(installer):
+            save_payload()
+            try:
+                result = as_user(user, ['python3', str(ROOT / 'keyring.py'), '--json'], capture_output=True, text=True, timeout=45)
+            except subprocess.CalledProcessError as error:
+                try: detail = json.loads(error.stdout).get('error')
+                except (ValueError, TypeError): detail = error.stderr
+                raise RuntimeError('Keyring initialization failed: ' + str(detail or error)) from error
+            data = json.loads(result.stdout)
+            if data.get('state') not in ('INITIALIZED', 'RETAINED'): raise RuntimeError(data.get('error', 'Keyring initialization did not report a verified result'))
+            if data.get('state') == 'INITIALIZED':
+                write_json(ETC / 'config.json', dict(config, keyring_mode='empty'))
+            return data
+
+
+def configure_ssh(options):
+    require_root(); require_debian()
+    if not options.yes: raise RuntimeError('SSH setup requires --yes and an explicit public key')
+    cleanup._trusted(sys.modules[__name__])
+    with operation_lock():
+        if active(): raise RuntimeError('Installation is still active; wait before configuring SSH')
+        installer = prepare_changes()
+        with cleanup_output('ssh.log') as logfile, cleanup.tracking(installer):
+            save_payload()
+            import ssh_setup
+            data = ssh_setup.setup(installer, options.ssh_public_key, options.ssh_port)
+            data['log'] = str(logfile)
+            return data
 
 
 def worker(options):
@@ -513,7 +733,7 @@ def worker(options):
                 failures = [item['name'] + ': ' + item.get('error', '') for item in verification.get('checks', []) if not item.get('passed')]
                 raise RuntimeError('Verification failed: ' + '; '.join(failures or [verification.get('error', 'see verification.json')]))
             write_json(STATE / 'installed.json', dict(owner=OWNER, installed_at=int(time.time())))
-            phase('READY_GPU' if config['render_node'] else 'READY_SOFTWARE')
+            phase('READY_GPU' if runtime.gpu_backend(config) != 'software' else 'READY_SOFTWARE')
         except Exception as exc:
             phase('ERROR', str(exc))
             raise
@@ -602,7 +822,7 @@ def uninstall(options):
     def unchanged(path):
         target = Path(path)
         return not target.is_symlink() and target.is_file() and manifest.get(str(target)) == hashlib.sha256(target.read_bytes()).hexdigest()
-    units = [Path('/etc/systemd/system') / f'onedebian-agent-{name}.service' for name in ('desktop', 'chromium')]
+    units = [Path('/etc/systemd/system') / f'onedebian-agent-{name}.service' for name in ('desktop', 'chromium', 'ssh')]
     units.append(Path('/etc/systemd/system') / JOB)
     units += [Path('/etc/systemd/user') / f'onedebian-agent-{name}.service' for name in ('mcp', 'novnc')]
     if any(path.exists() and not unchanged(path) for path in units):
@@ -611,9 +831,13 @@ def uninstall(options):
     for name in ('mcp', 'novnc'):
         subprocess.run(['runuser', '-u', user.pw_name, '--', 'systemctl', '--user', 'disable', '--now', f'onedebian-agent-{name}.service'], env=environment(user), check=False)
     subprocess.run(['systemctl', 'disable', '--now', 'onedebian-agent-chromium.service', 'onedebian-agent-desktop.service'], check=False)
+    if units[2].exists(): subprocess.run(['systemctl', 'disable', '--now', 'onedebian-agent-ssh.service'], check=False)
     kept = []
     for path, digest in read_json(STATE / 'files.json', {}).items():
         target = Path(path)
+        if path in ('/etc/systemd/system/ssh.service.d/90-onedebian-agent.conf', '/etc/systemd/system/ssh.socket.d/90-onedebian-agent.conf'):
+            kept.append(path)
+            continue
         if target.is_symlink() or not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
             kept.append(path)
         else:
@@ -650,9 +874,9 @@ def show_cleanup(data):
 
 
 @contextlib.contextmanager
-def cleanup_output():
+def cleanup_output(name='cleanup.log'):
     """Keep subprocess output out of the JSON protocol and retain failure details."""
-    path = STATE / 'cleanup.log'
+    path = STATE / name
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
     metadata = os.fstat(descriptor)
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0 or metadata.st_mode & 0o077:
@@ -662,7 +886,7 @@ def cleanup_output():
     saved = [os.dup(1), os.dup(2)]
     try:
         os.dup2(descriptor, 1); os.dup2(descriptor, 2)
-        print(f'Agent undo started at {int(time.time())}', file=sys.stderr, flush=True)
+        print(f'Agent {name.removesuffix(".log")} started at {int(time.time())}', file=sys.stderr, flush=True)
         yield path
     except Exception:
         traceback.print_exc()
@@ -675,8 +899,10 @@ def cleanup_output():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['plan', 'prepare-undo', 'prepare-wsl', 'install', 'resume', 'status', 'verify', 'uninstall', 'cleanup-plan', 'cleanup', '_run'])
+    parser.add_argument('action', choices=['plan', 'prepare-undo', 'prepare-wsl', 'install', 'resume', 'status', 'verify', 'uninstall', 'cleanup-plan', 'cleanup', 'gpu', 'keyring', 'ssh', '_run'])
     parser.add_argument('--plan-id')
+    parser.add_argument('--ssh-public-key', default='')
+    parser.add_argument('--ssh-port', type=int, default=2222)
     parser.add_argument('--mirror', choices=['keep', 'tuna', 'ustc', 'official'], default='keep')
     for option, default in [('viewer', 16080), ('mcp', 18931), ('cdp', 19222)]:
         parser.add_argument('--' + option + '-port', type=int, default=default)
@@ -688,7 +914,7 @@ def main():
         if '--mirror' not in sys.argv: options.mirror = previous.get('mirror', options.mirror)
         options.allow_low_resources = options.allow_low_resources or previous.get('allow_low_resources', False)
     if options.action != 'verify' and extra: parser.error('Unknown arguments: ' + ' '.join(extra))
-    for port in (options.viewer_port, options.mcp_port, options.cdp_port):
+    for port in (options.viewer_port, options.mcp_port, options.cdp_port, options.ssh_port):
         if not 1024 <= port <= 65535: parser.error('Ports must be between 1024 and 65535')
     try:
         if options.action == 'plan': data = plan(options)
@@ -701,6 +927,9 @@ def main():
         elif options.action == 'prepare-wsl': data = set_wsl_config(options)
         elif options.action in ('install', 'resume'): data = start_install(options)
         elif options.action == 'status': data = status()
+        elif options.action == 'gpu': data = configure_graphics(options)
+        elif options.action == 'keyring': data = configure_keyring(options)
+        elif options.action == 'ssh': data = configure_ssh(options)
         elif options.action == '_run': worker(options); return 0
         elif options.action == 'verify':
             return subprocess.call([sys.executable, str(ROOT / 'verify.py'), *( ['--json'] if options.json else []), *extra])
@@ -732,6 +961,8 @@ def main():
         if options.json:
             error = dict(state='ERROR', error=str(exc))
             if options.action == 'cleanup': error['log'] = str(STATE / 'cleanup.log')
+            if options.action == 'gpu': error['log'] = str(STATE / 'gpu.log')
+            if options.action == 'ssh': error['log'] = str(STATE / 'ssh.log')
             print(json.dumps(error, ensure_ascii=False))
         else: print(f'oneDebian Agent: {exc}', file=sys.stderr)
         return 1
