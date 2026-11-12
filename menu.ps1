@@ -14,6 +14,21 @@ $ProgressPreference = 'SilentlyContinue'
 # 默认基础配置
 $DefaultWslRoot = 'D:\wsl'
 
+function Get-OneDebianVersion {
+    param([string]$RepoRoot = $PSScriptRoot)
+    try {
+        if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.git') -ErrorAction Stop)) { return 'unknown (no Git metadata)' }
+        $oneDebianGit = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        $revision = @(& $oneDebianGit.Source --no-optional-locks -c core.fsmonitor=false -C $RepoRoot rev-parse --short=8 --verify HEAD 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $revision.Count -ne 1 -or $revision[0] -cnotmatch '^[a-f0-9]{8,64}$') { return 'unknown (Git metadata unavailable)' }
+        $changes = @(& $oneDebianGit.Source --no-optional-locks -c core.fsmonitor=false -C $RepoRoot status --porcelain --untracked-files=normal 2>$null)
+        if ($LASTEXITCODE -ne 0) { return 'unknown (Git metadata unavailable)' }
+        return $revision[0] + $(if ($changes.Count) { '+dirty' } else { '' })
+    } catch { return 'unknown (Git metadata unavailable)' }
+}
+
+$script:oneDebianVersion = Get-OneDebianVersion -RepoRoot $PSScriptRoot
+
 function Pause-Menu {
     Write-Host "`n$(Get-I18nStr 'Msg_Pause')" -ForegroundColor Gray
     try {
@@ -87,6 +102,7 @@ function Show-About {
     Write-Host "==========================================" -ForegroundColor Cyan
     Write-Host " 项目描述: Debian WSL 自动化安装与运维管理工具 (Automated Debian WSL Management Tool)"
     Write-Host " 作者    : Fred"
+    Write-Host " 工具版本: $script:oneDebianVersion"
     Write-Host " 支持版本: Debian 12 (Bookworm) / Debian 13 (Trixie)"
     Write-Host " 当前语言: $global:CurrentLang"
 
@@ -104,6 +120,7 @@ function Main {
         Write-Host "==================================================" -ForegroundColor Green
         Write-Host "       $(Get-I18nStr 'Menu_Title')       " -ForegroundColor Green
         Write-Host "==================================================" -ForegroundColor Green
+        Write-Host " oneDebian 版本 / Version: $(if ($script:oneDebianVersion) { $script:oneDebianVersion } else { 'unknown' })" -ForegroundColor DarkGray
         Write-Host " $(Get-I18nStr 'Menu_Check')" -ForegroundColor Cyan
         Write-Host " $(Get-I18nStr 'Menu_Install')" -ForegroundColor Yellow
         Write-Host " $(Get-I18nStr 'Menu_Update')" -ForegroundColor Yellow

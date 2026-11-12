@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Agent 工作浏览器
+Comment=定位 Agent 当前使用的浏览器和页面
+Exec=/usr/bin/python3 /opt/onedebian-agent/focus-browser.py
+Icon=chromium
+Terminal=false
