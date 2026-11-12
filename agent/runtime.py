@@ -23,6 +23,27 @@ CONFIG = Path('/etc/onedebian-agent/config.json')
 VERSIONS = Path('/etc/onedebian-agent/versions.json')
 MCP_UNIT = 'onedebian-agent-mcp.service'
 COOKIE = 'onedebian_viewer'
+GRAPHICS_VARIABLES = ('GALLIUM_DRIVER', 'MESA_D3D12_DEFAULT_ADAPTER_NAME', 'LIBGL_ALWAYS_SOFTWARE',
+                      'MESA_LOADER_DRIVER_OVERRIDE', 'MESA_GL_VERSION_OVERRIDE', 'MESA_GLES_VERSION_OVERRIDE')
+
+
+def gpu_backend(config):
+    render = config.get('render_node', '')
+    if not isinstance(render, str) or (render and not re.fullmatch(r'/dev/dri/renderD[0-9]+', render)):
+        raise RuntimeError('Invalid DRM render node')
+    backend = config.get('gpu_backend', 'drm' if render else 'software')
+    if backend not in ('software', 'drm', 'd3d12') or (backend == 'drm') != bool(render):
+        raise RuntimeError('Invalid GPU backend or render-node combination')
+    return backend
+
+
+def graphics_environment(config):
+    backend = gpu_backend(config)
+    if backend == 'd3d12':
+        return dict(GALLIUM_DRIVER='d3d12', MESA_D3D12_DEFAULT_ADAPTER_NAME='Intel')
+    if backend == 'software':
+        return dict(LIBGL_ALWAYS_SOFTWARE='true', GALLIUM_DRIVER='llvmpipe')
+    return {}
 
 
 def settings():
@@ -41,6 +62,7 @@ def settings():
             raise RuntimeError('Invalid Agent port')
     if len({result[x] for x in ('viewer_port', 'mcp_port', 'cdp_port')}) != 3:
         raise RuntimeError('Agent ports must differ')
+    result['gpu_backend'] = gpu_backend(result)
     result['uid'] = account.pw_uid
     return result
 
@@ -88,6 +110,9 @@ def viewer_token(config):
 def environment(config):
     result = os.environ.copy()
     result.pop('WAYLAND_DISPLAY', None)
+    for name in GRAPHICS_VARIABLES:
+        result.pop(name, None)
+    result.update(graphics_environment(config))
     result.update(HOME=config['home'], DISPLAY=config['display'],
                   XAUTHORITY=str(run_dir(config) / 'Xauthority'),
                   XDG_RUNTIME_DIR='/run/user/' + str(config['uid']),
@@ -122,9 +147,8 @@ def wait_x(config, process=None):
 
 def desktop_command(config):
     directory = run_dir(config)
+    gpu_backend(config)
     render = config.get('render_node', '')
-    if render and not re.fullmatch(r'/dev/dri/renderD[0-9]+', render):
-        raise RuntimeError('Invalid DRM render node')
     return ['Xtigervnc', config['display'], '-geometry', '1600x900', '-depth', '24',
             '-auth', str(directory / 'Xauthority'), '-SecurityTypes', 'None',
             '-rfbport', '-1', '-rfbunixpath', str(directory / 'vnc.sock'),
@@ -242,6 +266,9 @@ def chromium_command(config):
 
 def chromium(config):
     wait_x(config)
+    if config.get('keyring_mode') == 'empty':
+        from keyring import ensure_empty
+        print(json.dumps(ensure_empty(config)), flush=True)
     initialize_profile(profile_path(config))
     os.execvpe('/usr/bin/chromium', chromium_command(config), environment(config))
 
@@ -487,7 +514,8 @@ def status(config):
         services[unit] = result.stdout.strip() or 'unknown'
     return {'user': config['user'], 'manual': manual(config), 'services': services,
             'viewer': f"http://127.0.0.1:{config['viewer_port']}/", 'mcp': f"http://127.0.0.1:{config['mcp_port']}/mcp",
-            'profile': str(profile_path(config)), 'render_node': config.get('render_node') or 'software',
+            'profile': str(profile_path(config)), 'gpu_backend': gpu_backend(config),
+            'render_node': config.get('render_node', ''),
             'keyring': 'User setup/unlock may be required; existing credentials are retained'}
 
 

@@ -264,15 +264,19 @@ function Invoke-WslAgentCleanup {
     Write-WslAgentCleanupItems '保留内容 / Retained' $done.retained ([int]::MaxValue)
     Write-WslAgentCleanupItems '说明 / Notes' $done.warnings ([int]::MaxValue)
     if ($result.ExitCode -ne 0 -or $done.state -notin 'CLEANED', 'CLEANED_PARTIAL') { throw "清理未完成，请查看记录后再操作 / Incomplete：$($done.error)" }
+    if (Get-Command Remove-WslAgentSshRegistration -ErrorAction SilentlyContinue) {
+        $registration = Remove-WslAgentSshRegistration -Distro $Distro
+        if ($registration.state -eq 'SSH_RETAINED') { Write-Host $registration.reason -ForegroundColor Yellow }
+    }
     if ($done.state -eq 'CLEANED_PARTIAL') { Write-Host '仅撤销了可确认的变更；未确认或修改过的内容仍保留 / Partial' -ForegroundColor Yellow }
 }
 
 function Invoke-WslAgent {
     param(
-        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup')][string]$Action = 'Menu',
+        [ValidateSet('Menu', 'Create', 'Install', 'Resume', 'Status', 'Verify', 'Open', 'Uninstall', 'RelayStart', 'RelayStop', 'RelayStatus', 'CleanupPlan', 'Cleanup', 'Graphics', 'Keyring', 'Ssh')][string]$Action = 'Menu',
         [string]$DistroName = '', [string]$WslRoot = 'D:\wsl',
         [ValidateSet('keep', 'tuna', 'ustc', 'official')][string]$Mirror = '',
-        [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222,
+        [int]$ViewerPort = 16080, [int]$McpPort = 18931, [int]$CdpPort = 19222, [int]$SshPort = 2222,
         [switch]$Yes, [switch]$RestartSelected, [switch]$AdoptUser, [switch]$Autostart, [switch]$NoWait, [switch]$AllowLowResources
     )
     if ($Action -eq 'Menu') {
@@ -285,9 +289,12 @@ function Invoke-WslAgent {
         Write-Host '8. 启动本机转发 / Relay start    9. 停止本机转发 / Relay stop'
         Write-Host '10. 本机转发状态 / Relay status'
         Write-Host '11. 撤销 Agent 安装（保留 WSL 和资料） / Undo'
+        Write-Host '12. 重新检测／启用加速 / Graphics'
+        Write-Host '13. 初始化新凭据库为空密码（保留已有库） / Keyring'
+        Write-Host '14. 配置固定 SSH 别名并启动服务 / SSH'
         Write-Host '0. 返回 / Back'
         $choice = Read-Host '选择 / Select [1]'
-        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup' }
+        $actions = @{ '1' = 'Create'; '2' = 'Install'; '3' = 'Resume'; '4' = 'Status'; '5' = 'Verify'; '6' = 'Open'; '7' = 'Uninstall'; '8' = 'RelayStart'; '9' = 'RelayStop'; '10' = 'RelayStatus'; '11' = 'Cleanup'; '12' = 'Graphics'; '13' = 'Keyring'; '14' = 'Ssh' }
         if (-not $choice) { $choice = '1' }
         if ($choice -eq '0') { return }
         if (-not $actions.ContainsKey($choice)) { throw 'Invalid Agent action.' }
@@ -318,6 +325,44 @@ function Invoke-WslAgent {
         $AllowLowResources = Confirm-WslAgentResources -WslRoot $WslRoot -AllowLowResources:$AllowLowResources -Yes:$Yes
     } elseif ($registered -notcontains $DistroName) { throw "WSL distribution is not registered: $DistroName" }
     if ($Action -in 'CleanupPlan', 'Cleanup') { Invoke-WslAgentCleanup -Distro $DistroName -PlanOnly:($Action -eq 'CleanupPlan'); return }
+    if ($Action -eq 'Ssh') {
+        Write-Host "配置 $DistroName 的密钥 SSH 与固定别名；仅实例回环监听，不开放 Windows 22。 / Key-only SSH" -ForegroundColor Yellow
+        if (-not $Yes -and (Read-Host '配置并启动 SSH？/ Apply [y/N]') -ne 'Y') { return }
+        $entry = Send-WslAgentBundle -Distro $DistroName
+        Initialize-WslAgentSsh -Distro $DistroName -Entry $entry -SshPort $SshPort
+        return
+    }
+    if ($Action -eq 'Keyring') {
+        Write-Host "目标 / Target: $DistroName" -ForegroundColor Cyan
+        Write-Host '仅将新凭据库初始化为空密码；保留已有库和旧凭据，不关闭浏览器或重启。空密码会降低本机保存凭据的保护。' -ForegroundColor Yellow
+        if (-not $Yes -and (Read-Host '允许新凭据库使用空密码？/ Allow [y/N]') -ne 'Y') { Write-Host '已取消 / Cancelled'; return }
+        $entry = Send-WslAgentBundle -Distro $DistroName
+        $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command keyring -Options @('--yes', '--json') -Timeout 0 -AllowFailure
+        try { $keyring = $result.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw "凭据库结果无法读取 / Invalid keyring result：$($result.ErrorText)" }
+        if ($keyring.state) { Write-Host "凭据库状态 / Keyring: $($keyring.state)" }
+        if ($keyring.reason) { Write-Host "说明 / Reason: $($keyring.reason)" }
+        if ($result.ExitCode -ne 0 -or -not $keyring.state -or $keyring.state -in 'ERROR', 'BLOCKED') { throw "凭据库操作未完成 / Incomplete：$($keyring.error) $($keyring.reason)" }
+        return
+    }
+    if ($Action -eq 'Graphics') {
+        Write-Host "目标 / Target: $DistroName" -ForegroundColor Cyan
+        Write-Host '重新检测加速，必要时短暂重启工作机浏览器；保留资料和页面，失败回到软件模式。不重装 WSL、不重启桌面或其他实例。' -ForegroundColor Yellow
+        if (-not $Yes -and (Read-Host '执行以上操作？/ Apply [y/N]') -ne 'Y') { Write-Host '已取消 / Cancelled'; return }
+        $entry = Send-WslAgentBundle -Distro $DistroName
+        $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command gpu -Options @('--yes', '--json') -Timeout 0 -AllowFailure
+        try { $graphics = $result.Text | ConvertFrom-Json -ErrorAction Stop } catch { throw "加速结果无法读取 / Invalid GPU result：$($result.ErrorText)" }
+        if ($graphics.backend) { Write-Host "渲染后端 / Backend: $($graphics.backend)" }
+        if ($graphics.reason) { Write-Host "原因 / Reason: $($graphics.reason)" }
+        if ($graphics.log) { Write-Host "日志 / Log: $($graphics.log)" }
+        if ($result.ExitCode -ne 0 -or $graphics.state -notin 'READY_GPU', 'READY_SOFTWARE') {
+            if ("$($graphics.reason) $($graphics.error)" -match '(?i)manual|takeover|人工接管') { Write-Host '人工接管中，未调整浏览器 / Manual' -ForegroundColor Yellow }
+            throw "加速调整未完成 / Incomplete：$($graphics.error) $($graphics.reason)"
+        }
+        if ($graphics.state -eq 'READY_GPU' -and $graphics.backend -in 'drm', 'd3d12') { Write-Host '硬件加速验收通过 / Accelerated' -ForegroundColor Green }
+        elseif ($graphics.state -eq 'READY_SOFTWARE' -and $graphics.backend -eq 'software') { Write-Host '使用软件渲染 / Software' -ForegroundColor Yellow }
+        else { throw '加速结果不一致 / Inconsistent GPU result' }
+        return
+    }
     if ($Action -eq 'RelayStart') { Write-WslAgentRelayStatus (Start-WslAgentRelay -Distro $DistroName); return }
     if ($Action -eq 'RelayStop') { Write-WslAgentRelayStatus (Stop-WslAgentRelay -Distro $DistroName); return }
     if ($Action -eq 'RelayStatus') { Write-WslAgentRelayStatus (Get-WslAgentRelayStatus -Distro $DistroName); return }
@@ -333,6 +378,10 @@ function Invoke-WslAgent {
         $options = if ($Action -eq 'Uninstall') { @('--yes') } else { @() }
         $result = Invoke-WslAgentCommand -Distro $DistroName -Command $Action.ToLowerInvariant() -Options $options -Timeout 0
         Write-Host $result.Text
+        if ($Action -eq 'Uninstall' -and (Get-Command Remove-WslAgentSshRegistration -ErrorAction SilentlyContinue)) {
+            $registration = Remove-WslAgentSshRegistration -Distro $DistroName
+            if ($registration.state -eq 'SSH_RETAINED') { Write-Host $registration.reason -ForegroundColor Yellow }
+        }
         return
     }
     if ($Action -eq 'Resume') {
@@ -344,7 +393,7 @@ function Invoke-WslAgent {
         if ($Mirror) { $resumeOptions += @('--mirror', $Mirror) }
         $result = Invoke-WslAgentCommand -Distro $DistroName -Command resume -Options $resumeOptions -Timeout 0
         Write-Host "已请求继续安装 / Resume requested: $DistroName"
-        if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName }
+        if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName -SshPort $SshPort }
         return
     }
     if (-not $Mirror) { $Mirror = if ($new) { 'tuna' } else { 'keep' } }
@@ -359,6 +408,8 @@ function Invoke-WslAgent {
     }
     if ($new) { Write-Host "新建位置: $(Join-Path $WslRoot $DistroName)；启用 systemd、默认 agent、关闭 Windows 磁盘挂载/互操作、保护 WSL 网络，并只重启新实例。" }
     if ($AdoptUser) { Write-Host '显式接纳已有 agent 用户；不更改其密码或复制凭据。' -ForegroundColor Yellow }
+    Write-Host '新凭据库自动设为空密码（未加密）；已有库和旧密码保留。Node 中全局安装 pnpm。 / New keyring: empty; existing: retained; pnpm: global.' -ForegroundColor Yellow
+    Write-Host '就绪后自动配置密钥 SSH、固定别名和实例开机自启；本机私钥留在 Windows。 / SSH: automatic.' -ForegroundColor Yellow
     if (-not $Yes -and (Read-Host '执行以上操作 / Apply? [y/N]') -ne 'Y') { return }
     if ($new) {
         & (Join-Path $PSScriptRoot 'wsl_install.ps1') -Version 13 -DistroName $DistroName -WslRoot $WslRoot -AgentImportOnly -Confirmed
@@ -384,6 +435,7 @@ function Invoke-WslAgent {
     if ($AllowLowResources) { $options += '--allow-low-resources' }
     $result = Invoke-WslAgentCommand -Distro $DistroName -Entry $entry -Command install -Options $options -Timeout 0
     Write-Host "安装任务已提交 / Installation job submitted: $DistroName"
-    if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName }
+    if (-not $NoWait) { $null = Wait-WslAgentInstall -Distro $DistroName; Complete-WslAgentAccess -Distro $DistroName -SshPort $SshPort }
+    else { Write-Host '后台安装完成后，运行 09 → 3 继续或 09 → 14 配置 SSH。 / SSH after install.' }
     Write-Host "后续 / Next: .\agent-via-wsl.ps1 -Action Status -DistroName $DistroName"
 }

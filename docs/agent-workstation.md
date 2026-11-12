@@ -37,14 +37,59 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent-via-wsl.ps1 -Act
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\agent-via-wsl.ps1 -Action Open -DistroName ai-dev
 ```
 
-新电脑仍有两项首次设置：在桌面选择凭据库密码策略，以及用以下命令为这台工作机授权 Codex。空密码需在桌面明确确认未加密存储；本仓库不会复制其他电脑的凭据库设置、网站登录或 Codex 凭据。
+首次使用时选择凭据库密码策略；真实网站账号按需登录。本仓库不复制其他电脑的凭据库设置、网站登录或 Codex 凭据。使用 Windows 上的 Codex 控制这台工作机，无需在 Linux 中再次登录 Codex。
+
+若希望免除新凭据库密码输入，可明确选择 **09 → 13 初始化新凭据库为空密码 / Keyring**，原生 Debian 为 **14 → 9**。此操作仅初始化新库，保留已有凭据库和旧凭据，不关闭浏览器或重启实例；已有带密码的库仍需自己解锁。空密码会降低本机凭据的保护，确认前会展示影响。
+
+只有希望直接在 Linux 中使用 Codex CLI 时，才需要另行授权；以下命令为可选项：
 
 ```powershell
 wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex login --device-auth
 wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex
 ```
 
-因此“一键部署”指软件环境自动安装，首次账号授权和凭据库选择仍由使用者完成。本次 `ai-dev` 的空密码设置是该实例的选择，不会成为其他电脑的默认设置。
+“一键部署”指软件环境自动安装；凭据库策略和真实网站账号登录由使用者选择。Linux Codex CLI 及其授权均不是浏览器工作机运行的前提。
+
+### 由 Windows Codex 控制现有工作机
+
+若希望 Windows Codex 使用普通 SSH 命令，初始化完成后会准备专用 SSH 服务和 `oneDebian-<实例名>` 别名；已有工作机使用 **09 → 14 SSH** 补配置。默认示例为 `ssh oneDebian-ai-dev`，命令可写成 `ssh oneDebian-ai-dev 'cd ~/workspaces/my-app && pnpm dev'`。这仍是 Windows Codex 调用 SSH，不是设置中的“SSH 远程项目”，无需在 Linux 中授权 Codex。
+
+使用 `-NoWait` 时只提交后台安装；完成后再执行 Resume 或 **09 → 14 SSH**。已有实例可直接运行 `./agent-via-wsl.ps1 -Action Ssh -DistroName debian-wsl-main`；SSH 端口冲突时用 `-SshPort 2223` 等明确指定其他端口。回环 SSH 不直接向局域网开放。原生 Debian 可通过 **14 → 10** 提供公钥后配置，或继续使用原有 SSH 服务。
+
+别名的 `ProxyCommand` 通过 `wsl.exe --distribution <实例名> --user agent --exec /usr/bin/nc 127.0.0.1 2222` 进入指定实例，使用实例名而非 WSL 的 NAT IP。它不创建 Windows 22 端口的监听，也不修改全局 WSL 网络，因此 `ssh 127.0.0.1` 不是这个入口。端口被占用时会拒绝，保留原服务。
+
+Windows 专用私钥保存在 `~/.ssh/onedebian_agent_ed25519`，只将公钥传入客机。每个实例的 SSH 配置和可信 host key 存于 `~/.ssh/onedebian-agent/`；主配置只增加一条位于文件开头的 Include，原有条目保留。连接强制公钥、严格 host key 检查；创建时会执行一次无密码登录验证。WSL 重建时，以选中实例中可信读取到的新 host key 更新自有记录，不关闭身份校验。遇已有同名别名、未知密钥或修改过的自有记录会拒绝覆盖。
+
+完整撤销安装后，只清理该实例中校验未变的自有 Windows SSH 别名和 host-key 文件；Windows 私钥和其他实例的条目保留，修改过的记录保留并说明原因。
+
+新装的系统级 `ssh.service`／`ssh.socket` 使用自有保护片段，避免意外改为监听 22；原有系统 SSH 不改动。轻量卸载保留软件包时也保留保护片段；完整撤销若不能安全移除 SSH 包，同样保留并报告。需要改为自行管理系统 SSH 时，应先核对并撤销对应的 oneDebian 保护片段。
+
+保持 Codex 运行在 Windows。命令通过 `wsl.exe` 在所选实例执行，浏览器通过 Windows 回环转发连接 Debian 中的 MCP；同机不需要 SSH，也无需 Linux Codex 授权。在 **09 → 8 启动本机转发** 选择目标实例，或运行：
+
+```powershell
+.\agent-via-wsl.ps1 -Action RelayStart -DistroName ai-dev
+.\agent-via-wsl.ps1 -Action Open -DistroName ai-dev
+```
+
+在 Windows 的 Codex 配置（通常为 `$env:USERPROFILE\.codex\config.toml`）添加或更新对应服务，避免重复同名段落：
+
+```toml
+[mcp_servers.vm_browser]
+url = "http://127.0.0.1:18931/mcp"
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+disabled_tools = ["browser_close"]
+```
+
+重载 MCP 连接后，用 `/mcp` 检查 `vm_browser`。配置字段依据 [OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)；自定义转发端口时同步修改 URL。本机只做连接转发，MCP 服务和 Chromium 仍在 Debian 内运行。
+
+让 Windows Codex 运行项目命令时，显式指定实例和普通用户。通用形式为 `wsl.exe -d <实例名> -u agent -- bash -lc '<命令>'`，例如：
+
+```powershell
+wsl.exe -d ai-dev -u agent -- bash -lc 'cd /home/agent/workspaces/my-app && /home/agent/.local/bin/npm run dev -- --host 127.0.0.1'
+```
+
+项目保存在 Linux 的 `/home/agent/workspaces`，避免使用 `/mnt/c` 作为工作目录。可向 Codex 明确说明：“命令统一通过 ai-dev 的 wsl.exe 执行，浏览器统一使用 vm_browser；保留工作标签页，连接失败先报告状态。”前端监听 Linux 回环即可由同实例 Chromium 访问。
 
 基本检查使用 **09 → 5 验收**。完成首次凭据库设置、交还 Codex 后，可再运行完整浏览器验收；它只使用合成页面和 Cookie：
 
@@ -123,11 +168,21 @@ ssh -N -L 127.0.0.1:16080:127.0.0.1:16080 -L 127.0.0.1:18931:127.0.0.1:18931 <�
 
 在服务器上以 `agent` 运行 `python3 /opt/onedebian-agent/runtime.py open-url`，将输出的带片段令牌地址放到自己本机浏览器。自定义端口时隧道两端保持一致；工具不将监听地址改为 `0.0.0.0`。
 
-首次使用 keyring 可能需要在桌面设置或解锁密码；自动登录不能解锁有密码的 keyring，状态会保留这一待办。工具不自动设置空密码，也不改成明文凭据存储。真实网站账号由用户首次授权。
+新安装在 Chromium 启动前自动创建空密码 keyring，首次启动不再要求输入新库密码；空密码表示本机凭据未加密。已有库和密码保留，自动登录不能解锁已有加密 keyring，也不通过 Chromium 的 `password-store=basic` 绕过凭据库。真实网站账号由用户首次授权。已有工作机可用 **09 → 13 Keyring**（原生 **14 → 9**）初始化新库；若旧“创建 keyring”弹窗已经打开，先取消该旧弹窗一次。配置为 `keyring_mode: manual` 可继续使用手动初始化。
 
 ## GPU、状态与恢复
 
-首次安装仅尝试已有 `/dev/dri/renderD*`，在独立临时 profile 中检查原生 EGL 绘制、WebGL1/2 绘制与 Chromium GPU 进程对应设备文件句柄。失败回到软件桌面，不安装宿主 GPU 驱动、不换内核。仅有 `/dev/dxg` 不能证明该独立桌面支持硬件加速。GPU 验收可再运行 `sudo bash ./agent.sh verify --gpu`；软件模式下该硬件验收应失败，普通浏览器验收仍应通过。
+GPU 分为原生 DRM 和 WSL DXG／Mesa D3D12 两条路径。`/dev/dxg` 不是 DRM render node；只有设备存在或 `glxinfo` 显示加速，还不足以认定浏览器通过。验收要求原生 EGL 实际绘制、Chromium WebGL1/2 着色与像素回读，以及对应后端的进程／设备证据。失败使用软件模式，不安装宿主显卡驱动、不更换内核，也不通过 WSLg 把窗口弹到 Windows 桌面。
+
+已经安装、处于软件模式的工作机无需重装。拉取新版仓库，选择 **09 → 12 重新检测／启用加速 / Graphics**；原生 Debian 使用 **14 → 8**。也可从 Windows 显式指定已有实例：
+
+```powershell
+.\agent-via-wsl.ps1 -Action Graphics -DistroName ai-dev
+```
+
+确认后先在临时 profile 中探测；必要时短暂重启工作机 Chromium，保留项目、浏览器资料、页面和凭据，失败回到软件模式。不会重启桌面或 WSL，也不停止本机转发。人工接管期间拒绝调整，先自行交还 Codex 再重试；工具不自动清除人工标记。菜单显示后端、原因和 GPU 日志路径。`-Yes` 仅用于已明确授权的自动化，并仍须指定目标实例。
+
+本机 i5-1240P 的独立 VNC 桌面已通过 D3D12 原生 EGL 和 Chromium WebGL1/2 实际着色／像素回读探测；i5-1340P 尚未实测，目标机器仍需运行上述检查。GPU 验收可单独运行 `sudo bash ./agent.sh verify --gpu`；软件模式下该硬件验收应失败，普通浏览器验收仍应通过。
 
 安装任务由 `onedebian-agent-install.service` 执行，关闭进度窗口不会主动取消后台任务，但 WSL 实例仍需保持运行。已有实例的驻留策略不会自动改变，可在 **07 状态** 中确认。日志在 `/var/lib/onedebian-agent/install.log`，阶段／版本／GPU 证据保存在 `/var/lib/onedebian-agent/` 和 `/etc/onedebian-agent/`。重新运行不会启动第二个并发任务；中断后使用 Resume，保留已下载文件。
 
@@ -173,3 +228,9 @@ Windows 也可从仓库目录执行：
 清理执行时，原生命令输出保存到仅 root 可读的 `/var/lib/onedebian-agent/cleanup.log`，不混入 JSON 结果；Windows 无论清理完成还是失败都会显示返回的日志路径。排查时可在目标系统运行 `sudo tail -n 80 /var/lib/onedebian-agent/cleanup.log`。计划预览没有执行清理，不代表已经产生该日志。
 
 此环境没有 PVE 宿主级内网隔离，WSL 也不是用于运行不可信代码的强隔离边界。首版不移植 PVE 防火墙、显卡直通或 SLS。
+
+新安装同时以 `agent` 用户在 fnm 管理的 Node 中全局安装固定版本 pnpm，记录于 `/etc/onedebian-agent/versions.json`；不需要 `sudo npm`。已有工作机可用以下命令补装，不必重装：
+
+```bash
+~/.local/share/fnm/fnm --fnm-dir ~/.local/share/fnm exec --using=/etc/onedebian-agent/node-version npm install -g pnpm@12.18.0
+```

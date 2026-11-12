@@ -1,5 +1,6 @@
 """Offline verifier checks. Never touches a real desktop or registered WSL instance."""
 import importlib.util
+import io
 import http.server
 import json
 import os
@@ -18,6 +19,94 @@ spec.loader.exec_module(verify)
 
 
 class VerifierTests(unittest.TestCase):
+    def test_d3d12_requires_intel_dxg_and_both_loaded_libraries(self):
+        self.assertTrue(verify.d3d12_renderer('ANGLE (Microsoft, D3D12 (Intel(R) Iris(R) Xe Graphics), OpenGL 4.1)'))
+        for name in ['llvmpipe','D3D12 (Microsoft WARP)','Intel OpenGL','D3D12 (NVIDIA Graphics)']:
+            self.assertFalse(verify.d3d12_renderer(name))
+        with tempfile.TemporaryDirectory() as temporary:
+            process = Path(temporary); (process/'fd').mkdir()
+            maps = process/'maps'; maps.write_text('/usr/lib/wsl/lib/libd3d12.so\n/usr/lib/wsl/lib/libdxcore.so\n')
+            self.assertFalse(verify.d3d12_evidence(process)['passed'])
+            (process/'fd/5').symlink_to('/dev/dxg')
+            self.assertTrue(verify.d3d12_evidence(process)['passed'])
+            maps.write_text('/usr/lib/wsl/lib/libd3d12.so\n')
+            self.assertFalse(verify.d3d12_evidence(process)['passed'])
+
+    def test_dxg_evidence_belongs_to_the_owned_gpu_child(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            proc = Path(temporary)
+            for pid,parent,kind in [(100,1,'browser'),(101,100,'gpu-process'),(102,100,'renderer'),(200,1,'gpu-process')]:
+                folder = proc/str(pid); folder.mkdir(); (folder/'status').write_text(f'PPid:\t{parent}\n')
+                (folder/'cmdline').write_bytes(b'chromium\0--type='+kind.encode()+b'\0')
+                (folder/'fd').mkdir(); (folder/'fd/8').symlink_to('/dev/dxg')
+                (folder/'maps').write_text('/usr/lib/wsl/lib/libd3d12.so\n/usr/lib/wsl/lib/libdxcore.so\n')
+            found = verify.gpu_process_fds(100,os.getuid(),'',proc,backend='d3d12')
+            self.assertEqual([item['pid'] for item in found],[101])
+            self.assertEqual(found[0]['device'],'/dev/dxg')
+
+    def test_d3d12_shader_checks_accept_combined_webgl_status_but_reject_disabled_webgl2(self):
+        renderer='ANGLE (Microsoft, D3D12 (Intel(R) Iris(R) Xe Graphics), OpenGL 4.1)'
+        for explicit in (None,'disabled_software'):
+            with self.subTest(webgl2_status=explicit):
+                runner=verify.Verifier.__new__(verify.Verifier)
+                runner.cfg={'gpu_backend':'d3d12','render_node':'','cdp_port':19222}
+                runner.report={}; runner.uid=os.getuid(); runner.browser_pid=100
+                runner.env={'GALLIUM_DRIVER':'d3d12','MESA_D3D12_DEFAULT_ADAPTER_NAME':'Intel'}
+                features={'gpu_compositing':'enabled','webgl':'enabled'}
+                if explicit: features['webgl2']=explicit
+                draws={kind:dict(passed=True,renderer=renderer,pixel=[0,255,0,255]) for kind in ('webgl','webgl2')}
+                def cdp(method,params=None,endpoint=None):
+                    if method=='SystemInfo.getInfo': return {'gpu':{'auxAttributes':{'glRenderer':renderer},'featureStatus':features}}
+                    if method=='Target.createTarget': return {'targetId':'trial'}
+                    if method=='Runtime.evaluate':
+                        self.assertIn('gl.readPixels',params['expression'])
+                        return {'result':{'value':draws}}
+                    if method=='Target.closeTarget': return {}
+                    raise AssertionError(method)
+                native=mock.Mock(returncode=0,stdout=json.dumps({'passed':True}),stderr='')
+                response=io.BytesIO(json.dumps([{'id':'trial','webSocketDebuggerUrl':'ws://127.0.0.1:19222/devtools/page/trial'}]).encode())
+                with mock.patch.object(runner,'manual',return_value=False),mock.patch.object(runner,'cdp',side_effect=cdp), \
+                     mock.patch.object(runner,'user_command',side_effect=lambda argv:argv), \
+                     mock.patch.object(verify.os,'geteuid',return_value=0),mock.patch.object(verify.Path,'exists',return_value=True), \
+                     mock.patch.object(verify.subprocess,'run',side_effect=[mock.Mock(stdout='123\n'),native]) as command, \
+                     mock.patch.object(verify,'local_open',return_value=response), \
+                     mock.patch.object(verify,'gpu_process_fds',return_value=[{'pid':101,'device':'/dev/dxg'}]) as fds:
+                    if explicit:
+                        with self.assertRaisesRegex(RuntimeError,'webgl2'): runner.gpu_check()
+                        fds.assert_not_called()
+                    else:
+                        self.assertTrue(runner.gpu_check()['passed'])
+                        self.assertEqual(fds.call_args.kwargs['backend'],'d3d12')
+                    args=command.call_args_list[1].args[0]
+                    self.assertIn('--gpu-backend',args); self.assertIn('d3d12',args)
+                    self.assertNotIn('--render-node',args)
+                    self.assertEqual(command.call_args_list[1].kwargs['env']['GALLIUM_DRIVER'],'d3d12')
+
+    @unittest.skipUnless(os.geteuid() == 0,'Root-owned probe fixture')
+    def test_probe_configuration_is_fixed_private_and_cannot_use_the_working_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'config.json'
+            config=dict(home='/home/agent',probe_unit='onedebian-agent-gpu-probe.service',
+                        probe_profile='/home/agent/.local/share/onedebian-agent/probes/trial')
+            path.write_text(json.dumps(config)); path.chmod(0o600)
+            with mock.patch.object(verify,'PROBE_CONFIG',path):
+                self.assertEqual(verify.probe_config(),config)
+                for change in [dict(probe_unit='other.service'),dict(probe_profile='/home/agent/.local/share/onedebian-agent/profile')]:
+                    path.write_text(json.dumps(dict(config,**change)))
+                    with self.assertRaises(RuntimeError): verify.probe_config()
+                path.write_text(json.dumps(config)); path.chmod(0o666)
+                with self.assertRaisesRegex(RuntimeError,'Untrusted'): verify.probe_config()
+
+    def test_verifier_passes_the_selected_backend_to_native_environment(self):
+        account=mock.Mock(pw_uid=1000,pw_name='agent')
+        config=dict(user='agent',home='/home/agent',viewer_port=16080,mcp_port=18931,cdp_port=19222,
+                    gpu_backend='d3d12',render_node='')
+        with mock.patch.object(verify.pwd,'getpwnam',return_value=account),mock.patch.object(verify.os,'geteuid',return_value=0):
+            runner=verify.Verifier(config,{'node':'v26.13.0'})
+        self.assertEqual(runner.env['GALLIUM_DRIVER'],'d3d12')
+        self.assertEqual(runner.env['MESA_D3D12_DEFAULT_ADAPTER_NAME'],'Intel')
+        self.assertNotIn('LIBGL_ALWAYS_SOFTWARE',runner.env)
+
     def test_software_renderers_never_pass(self):
         for name in ['', 'llvmpipe (LLVM 20)', 'ANGLE (Google SwiftShader)', 'Microsoft WARP',
                      'Mesa softpipe', 'lavapipe', 'Software Rasterizer','SVGA3D','virgl']:
@@ -176,6 +265,16 @@ class VerifierTests(unittest.TestCase):
                  mock.patch.object(verify.subprocess,'run',return_value=mock.Mock(stdout='123\n')):
                 with self.assertRaisesRegex(RuntimeError,'CDP browser PID differs'):
                     runner.browser_check(proc)
+
+    def test_recorded_pnpm_is_required_in_both_wrapper_and_interactive_shell(self):
+        runner=verify.Verifier.__new__(verify.Verifier)
+        runner.home=PurePosixPath('/home/agent'); runner.versions={'node':'v26.13.0','pnpm':'12.18.0'}
+        for last in ('12.18.0','0.0.0'):
+            replies=[mock.Mock(stdout=x+'\n') for x in ['v26.13.0']*3+['12.18.0',last]]
+            with self.subTest(last=last), mock.patch.object(runner,'user',side_effect=replies):
+                if last=='0.0.0':
+                    with self.assertRaisesRegex(RuntimeError,'pnpm version mismatch'): runner.version_check()
+                else: self.assertEqual(runner.version_check()['pnpm'],'12.18.0')
 
     def test_chromium_rewritten_title_and_nul_argv_are_both_supported(self):
         with tempfile.TemporaryDirectory() as temporary:

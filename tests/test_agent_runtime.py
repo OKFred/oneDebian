@@ -30,6 +30,18 @@ def headers(*items):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_new_empty_keyring_is_initialized_before_chromium_can_request_credentials(self):
+        for mode in ('empty','manual'):
+            events=[]
+            initializer=mock.Mock(side_effect=lambda _cfg:events.append('keyring') or {'state':'INITIALIZED'})
+            with self.subTest(mode=mode), mock.patch.dict('sys.modules',{'keyring':mock.Mock(ensure_empty=initializer)}), \
+                 mock.patch.object(runtime,'wait_x',side_effect=lambda _cfg:events.append('display')), \
+                 mock.patch.object(runtime,'initialize_profile',side_effect=lambda _p:events.append('profile')), \
+                 mock.patch.object(runtime,'chromium_command',return_value=['chromium']), \
+                 mock.patch.object(runtime.os,'execvpe',side_effect=lambda *_args:events.append('browser')):
+                runtime.chromium(dict(config(),keyring_mode=mode))
+            self.assertEqual(events,['display']+(['keyring'] if mode=='empty' else [])+['profile','browser'])
+
     def test_private_desktop_unix_socket_no_network_vnc(self):
         command = runtime.desktop_command(config())
         self.assertEqual(command[command.index('-rfbport') + 1], '-1')
@@ -48,6 +60,54 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(env['DISPLAY'], ':10')
         self.assertEqual(env['XDG_RUNTIME_DIR'], '/run/user/1001')
         self.assertEqual(env['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/run/user/1001/bus')
+
+    def test_graphics_backend_is_compatible_with_old_config_and_rejects_dxg_as_drm(self):
+        self.assertEqual(runtime.gpu_backend(config()), 'software')
+        self.assertEqual(runtime.gpu_backend(dict(config(), render_node='/dev/dri/renderD129')), 'drm')
+        for backend, node in [('d3d12', ''), ('software', ''), ('drm', '/dev/dri/renderD129')]:
+            self.assertEqual(runtime.gpu_backend(dict(config(), gpu_backend=backend, render_node=node)), backend)
+        for backend, node in [('d3d12', '/dev/dxg'), ('drm', '/dev/dxg'), ('d3d12', '/dev/dri/renderD129'),
+                              ('software', '/dev/dri/renderD129'), ('drm', ''), ('unknown', ''), ('drm', 3)]:
+            with self.subTest(backend=backend, node=node), self.assertRaises(RuntimeError):
+                runtime.gpu_backend(dict(config(), gpu_backend=backend, render_node=node))
+
+    @unittest.skipIf(os.name == 'nt', 'Linux ordinary-user configuration validation')
+    def test_settings_rejects_backend_conflicts_before_starting_processes(self):
+        account = mock.Mock(pw_uid=1001, pw_dir='/home/agent')
+        with mock.patch.object(runtime, 'CONFIG') as path, \
+             mock.patch('pwd.getpwnam', return_value=account), \
+             mock.patch.object(runtime.os, 'getuid', return_value=1001), \
+             mock.patch.object(runtime.subprocess, 'run') as execute:
+            path.lstat.return_value = mock.Mock(st_mode=runtime.stat.S_IFREG | 0o644, st_uid=0)
+            path.read_text.return_value = json.dumps(dict(config(), gpu_backend='d3d12', render_node='/dev/dri/renderD129'))
+            with self.assertRaisesRegex(RuntimeError, 'backend'):
+                runtime.settings()
+            path.read_text.return_value = json.dumps(config())
+            self.assertEqual(runtime.settings()['gpu_backend'], 'software')
+            execute.assert_not_called()
+
+    def test_graphics_env_is_scoped_and_fallback_removes_hardware_overrides(self):
+        inherited = {name: 'inherited-override' for name in runtime.GRAPHICS_VARIABLES}
+        with mock.patch.dict(os.environ, inherited):
+            for backend, node, expected in [('software', '', {'LIBGL_ALWAYS_SOFTWARE':'true', 'GALLIUM_DRIVER':'llvmpipe'}),
+                    ('d3d12', '', {'GALLIUM_DRIVER':'d3d12', 'MESA_D3D12_DEFAULT_ADAPTER_NAME':'Intel'}),
+                    ('drm', '/dev/dri/renderD129', {})]:
+                with self.subTest(backend=backend):
+                    cfg = dict(config(), gpu_backend=backend, render_node=node)
+                    env = runtime.environment(cfg)
+                    self.assertEqual({key:env[key] for key in runtime.GRAPHICS_VARIABLES if key in env}, expected)
+                    self.assertEqual(runtime.graphics_environment(cfg), expected)
+                    self.assertEqual(env['DISPLAY'], ':10')
+                    self.assertNotIn('WAYLAND_DISPLAY', env)
+            self.assertTrue(all(os.environ[name] == value for name, value in inherited.items()))
+
+    def test_d3d12_keeps_the_private_desktop_and_sandboxed_browser(self):
+        cfg = dict(config(), gpu_backend='d3d12')
+        desktop = runtime.desktop_command(cfg)
+        self.assertEqual(desktop[desktop.index('-rendernode') + 1], '')
+        self.assertNotIn('/dev/dxg', desktop)
+        self.assertEqual(runtime.chromium_command(cfg), runtime.chromium_command(config()))
+        self.assertEqual(runtime.profile_path(cfg), runtime.profile_path(config()))
 
     def test_chromium_sandbox_session_restore_and_own_profile(self):
         command = [value.replace('\\', '/') for value in runtime.chromium_command(config())]
@@ -138,6 +198,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(result['viewer'], 'http://127.0.0.1:16080/')
         self.assertEqual(result['mcp'], 'http://127.0.0.1:18931/mcp')
         self.assertNotIn('token', json.dumps(result))
+        self.assertEqual(result['gpu_backend'], 'software')
+        self.assertEqual(result['render_node'], '')
+        with mock.patch.object(runtime.subprocess, 'run', return_value=mock.Mock(stdout='active\n')), \
+             mock.patch.object(runtime, 'manual', return_value=False):
+            accelerated = runtime.status(dict(config(), gpu_backend='d3d12'))
+        self.assertEqual(accelerated['gpu_backend'], 'd3d12')
+        self.assertEqual(accelerated['render_node'], '')
 
 
 class ViewerPolicyTests(unittest.TestCase):

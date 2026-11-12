@@ -300,9 +300,13 @@ function Ensure-WslAgentAccess {
 }
 
 function Complete-WslAgentAccess {
-    param([string]$Distro)
+    param([string]$Distro, [int]$SshPort = 2222)
     try {
         $access = Ensure-WslAgentAccess -Distro $Distro
         Write-Host "本机查看入口已验证 / Viewer verified: $Distro ($($access.Mode))" -ForegroundColor Green
     } catch { throw "工作机已就绪，但本机查看入口尚未接通 / Workstation ready; viewer unavailable. $($_.Exception.Message)" }
+    try {
+        $entry = Send-WslAgentBundle -Distro $Distro
+        Initialize-WslAgentSsh -Distro $Distro -Entry $entry -SshPort $SshPort
+    } catch { throw "工作机和查看入口已就绪，SSH 配置尚未完成，请用 09 → 14 重试。 / SSH incomplete: $($_.Exception.Message)" }
 }

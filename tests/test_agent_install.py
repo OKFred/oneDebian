@@ -47,6 +47,194 @@ class InstallerTests(unittest.TestCase):
         patch.start(); self.patches.append(patch)
         patch = mock.patch.object(install.package_undo, 'install_args', side_effect=lambda _i, argv: argv)
         patch.start(); self.patches.append(patch)
+        patch = mock.patch.object(install, 'd3d12_available', return_value=False)
+        patch.start(); self.patches.append(patch)
+        patch = mock.patch.object(install.runtime, 'manual', return_value=False)
+        patch.start(); self.patches.append(patch)
+
+    def test_first_install_can_prove_d3d12_without_a_drm_render_node(self):
+        cfg = {'render_node':'', 'gpu_backend':'software'}
+        user = types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        proof = {'passed':True,'gpu':{'passed':True,'backend':'d3d12'}}
+        with mock.patch.object(install.Path,'glob',return_value=[]), \
+             mock.patch.object(install,'d3d12_available',return_value=True), \
+             mock.patch.object(install,'probe_graphics',return_value=proof), \
+             mock.patch.object(install,'run'), mock.patch.object(install.subprocess,'run'), \
+             mock.patch.object(install,'write_json') as write:
+            install.verify_gpu(cfg,user)
+        self.assertEqual(cfg,{'render_node':'','gpu_backend':'d3d12'})
+        record = next(call.args[1] for call in write.call_args_list if call.args[0]==install.STATE/'gpu.json')
+        self.assertEqual((record['mode'],record['backend']),('gpu','d3d12'))
+
+    def test_runtime_installs_and_records_global_pnpm_in_the_pinned_fnm_node(self):
+        home=self.base/'agent-home'
+        user=types.SimpleNamespace(pw_dir=str(home))
+        downloads=install.STATE/'downloads'; downloads.mkdir()
+        archive=downloads/'fnm-fixture.zip'
+        with install.zipfile.ZipFile(archive,'w') as zipped: zipped.writestr('fnm',b'fixture-fnm')
+        digest=hashlib.sha256(archive.read_bytes()).hexdigest()
+        install.write_json(install.ETC/'config.json',{'mcp_port':18931})
+        def command(_user,argv,**kwargs):
+            value=install.VERSIONS['pnpm'] if argv[-2:]==['pnpm','--version'] else install.VERSIONS['node']
+            return types.SimpleNamespace(stdout=value+'\n')
+        with mock.patch.object(install,'capture',return_value='amd64'), \
+             mock.patch.object(install,'FNM',{'amd64':('fnm-fixture.zip',digest)}), \
+             mock.patch.object(install,'user_files',return_value=contextlib.nullcontext()), \
+             mock.patch.object(install,'as_user',side_effect=command) as run:
+            install.install_runtime(user)
+        calls=[call.args[1] for call in run.call_args_list]
+        global_install=next(argv for argv in calls if '--global' in argv)
+        self.assertEqual(global_install[-4:],['npm','install','--global','pnpm@'+install.VERSIONS['pnpm']])
+        self.assertEqual(install.read_json(install.ETC/'versions.json')['pnpm'],install.VERSIONS['pnpm'])
+        self.assertIn('exec --using=', (home/'.local/bin/pnpm').read_text())
+
+    def test_manual_takeover_rejects_gpu_adjustment_before_any_payload_change(self):
+        install.write_json(install.ETC/'config.json',{'user':'agent','home':'/home/agent','render_node':''})
+        user = types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        with mock.patch.object(install,'require_root'), mock.patch.object(install,'require_debian'), \
+             mock.patch.object(install.cleanup,'_trusted'), mock.patch.object(install.pwd,'getpwnam',return_value=user), \
+             mock.patch.object(install.runtime,'manual',return_value=True), mock.patch.object(install,'save_payload') as save:
+            with self.assertRaisesRegex(RuntimeError,'Manual takeover'):
+                install.configure_graphics(options(yes=True))
+        save.assert_not_called()
+        self.assertFalse((install.STATE/'gpu.log').exists())
+
+    def test_keyring_repair_preserves_existing_policy_and_reports_creation_failures(self):
+        cfg={'user':'agent','home':'/home/agent','keyring_mode':'manual'}
+        user=types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        for state in ('INITIALIZED','RETAINED','ERROR'):
+            install.write_json(install.ETC/'config.json',cfg)
+            with self.subTest(state=state), contextlib.ExitStack() as stack:
+                for name,value in [('require_root',None),('require_debian',None),('active',False),('prepare_changes',install),('save_payload',None)]:
+                    stack.enter_context(mock.patch.object(install,name,return_value=value))
+                stack.enter_context(mock.patch.object(install.cleanup,'_trusted'))
+                stack.enter_context(mock.patch.object(install.pwd,'getpwnam',return_value=user))
+                command=stack.enter_context(mock.patch.object(install,'as_user',return_value=types.SimpleNamespace(stdout=json.dumps({'state':state}))))
+                if state=='ERROR':
+                    command.side_effect=install.subprocess.CalledProcessError(1,['python3'],output='{"state":"ERROR","error":"unsafe fixture"}')
+                    with self.assertRaisesRegex(RuntimeError,'unsafe fixture'): install.configure_keyring(options(yes=True))
+                else: self.assertEqual(install.configure_keyring(options(yes=True))['state'],state)
+                expected='empty' if state=='INITIALIZED' else 'manual'
+                self.assertEqual(install.read_json(install.ETC/'config.json')['keyring_mode'],expected)
+
+    def test_gpu_adjustment_records_production_proof_and_recovers_on_failure(self):
+        cfg = {'user':'agent','home':'/home/agent','render_node':''}
+        user = types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        proof = {'passed':True,'gpu':{'passed':True,'backend':'d3d12','reason':'shader readback passed'}}
+        preserved = {'pages_before':2,'pages_after':2,'page_urls_preserved':True}
+        for case in ('pass','production-fails','production-raises','candidate-start-fails','tabs-lost','fallback-fails','fallback-raises','mcp-start-fails'):
+            with self.subTest(case=case), contextlib.ExitStack() as stack:
+                install.write_json(install.ETC/'config.json',cfg)
+                for name,value in [('require_root',None),('require_debian',None),('active',False),
+                                   ('status',{'state':'READY_SOFTWARE'}),('prepare_changes',install),
+                                   ('save_payload',None),('d3d12_available',True),('probe_graphics',proof),
+                                   ('phase',None),('user_ctl',types.SimpleNamespace(stdout='active'))]:
+                    stack.enter_context(mock.patch.object(install,name,return_value=value))
+                stack.enter_context(mock.patch.object(install.cleanup,'_trusted'))
+                stack.enter_context(mock.patch.object(install.pwd,'getpwnam',return_value=user))
+                stack.enter_context(mock.patch.object(install.runtime,'manual',return_value=False))
+                changes = stack.enter_context(mock.patch.object(install,'change_graphics_browser',return_value=preserved))
+                if case=='candidate-start-fails': changes.side_effect=[RuntimeError('CDP unavailable'),preserved]
+                if case=='tabs-lost': changes.side_effect=[dict(preserved,page_urls_preserved=False),preserved]
+                check = stack.enter_context(mock.patch.object(install,'graphics_check',return_value=proof))
+                if case=='production-fails': check.side_effect=[{'passed':False,'gpu':{'reason':'production draw failed'}},{'passed':True}]
+                if case=='production-raises': check.side_effect=[RuntimeError('production CDP timed out'),{'passed':True}]
+                if case=='fallback-fails': check.side_effect=[{'passed':False},{'passed':False}]
+                if case=='fallback-raises': check.side_effect=[RuntimeError('production failed'),RuntimeError('software check failed')]
+                if case=='mcp-start-fails':
+                    def user_command(_user, action, *_args, **_kwargs):
+                        if action=='start': raise RuntimeError('fixture MCP restart failed')
+                        return types.SimpleNamespace(stdout='active')
+                    install.user_ctl.side_effect=user_command
+                result = install.configure_graphics(options(yes=True))
+                expected='READY_GPU' if case=='pass' else 'ERROR' if case in ('tabs-lost','fallback-fails','fallback-raises','mcp-start-fails') else 'READY_SOFTWARE'
+                self.assertEqual(result['state'],expected)
+                record = install.read_json(install.STATE/'gpu.json')
+                self.assertEqual(record['result_state'],expected)
+                self.assertEqual(record['operation'],'graphics')
+                self.assertEqual(install.phase.call_args.args[0],expected)
+                self.assertIn('production',record)
+                if case in ('candidate-start-fails','tabs-lost','fallback-fails','fallback-raises'):
+                    self.assertTrue(changes.call_args.kwargs['recover'])
+                    self.assertEqual(changes.call_args.args[1]['gpu_backend'],'software')
+                if expected=='READY_SOFTWARE': self.assertTrue(record['fallback']['passed'])
+                if case=='production-raises': self.assertIn('production CDP timed out',record['reason'])
+                install.user_ctl.assert_any_call(user,'start','onedebian-agent-mcp.service')
+
+    def test_manual_takeover_during_production_check_prevents_recovery_and_mcp_restart(self):
+        cfg={'user':'agent','home':'/home/agent','render_node':'','gpu_backend':'software'}
+        install.write_json(install.ETC/'config.json',cfg)
+        user=types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        proof={'passed':True,'gpu':{'passed':True,'reason':'trial passed'}}
+        manual={'active':False}
+        def change(_previous,candidate,_user,**_kwargs):
+            install.write_json(install.ETC/'config.json',candidate)
+            return {'page_urls_preserved':True}
+        def check(*_args):
+            manual['active']=True
+            return {'passed':False,'gpu':{'reason':'Manual takeover is active'}}
+        with contextlib.ExitStack() as stack:
+            for name,value in [('require_root',None),('require_debian',None),('active',False),
+                               ('status',{'state':'READY_SOFTWARE'}),('prepare_changes',install),('save_payload',None),
+                               ('d3d12_available',True),('probe_graphics',proof),('phase',None),
+                               ('user_ctl',types.SimpleNamespace(stdout='active'))]:
+                stack.enter_context(mock.patch.object(install,name,return_value=value))
+            stack.enter_context(mock.patch.object(install.cleanup,'_trusted'))
+            stack.enter_context(mock.patch.object(install.pwd,'getpwnam',return_value=user))
+            stack.enter_context(mock.patch.object(install.runtime,'manual',side_effect=lambda _cfg:manual['active']))
+            changes=stack.enter_context(mock.patch.object(install,'change_graphics_browser',side_effect=change))
+            stack.enter_context(mock.patch.object(install,'graphics_check',side_effect=check))
+            result=install.configure_graphics(options(yes=True))
+            self.assertEqual(result['state'],'ERROR')
+            self.assertTrue(manual['active'])
+            self.assertEqual(changes.call_count,1)
+            self.assertEqual(result['backend'],'d3d12')
+            self.assertIn('Manual takeover',result['reason'])
+            self.assertNotIn(mock.call(user,'start','onedebian-agent-mcp.service'),install.user_ctl.call_args_list)
+
+    def test_browser_change_respects_manual_takeover_even_during_software_recovery(self):
+        cfg={'user':'agent','home':'/home/agent','render_node':''}
+        for recover in (False,True):
+            active={'manual':False}
+            control=mock.Mock()
+            control.browser_ready.side_effect=lambda:active.update(manual=True)
+            control.cdp.return_value={'targetInfos':[]}
+            module=types.SimpleNamespace(Verifier=mock.Mock(return_value=control))
+            with self.subTest(recover=recover), mock.patch.dict(sys.modules,{'verify':module}), \
+                 mock.patch.object(install.runtime,'manual',side_effect=lambda _cfg:active['manual']), \
+                 mock.patch.object(install,'run') as command:
+                with self.assertRaisesRegex(RuntimeError,'Manual takeover'):
+                    install.change_graphics_browser(cfg,cfg,None,recover=recover)
+            self.assertNotIn(mock.call('Browser.close'),control.cdp.call_args_list)
+            command.assert_not_called()
+
+    def test_gpu_retry_requires_an_owned_completed_install_and_graphics_error_record(self):
+        cfg={'user':'agent','home':'/home/agent','render_node':''}
+        install.write_json(install.ETC/'config.json',cfg)
+        user=types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000)
+        for installed,record,accepted in [({}, {}, False), ({'owner':install.OWNER}, {}, False),
+                 ({'owner':install.OWNER},{'operation':'graphics','result_state':'ERROR'},True)]:
+            install.write_json(install.STATE/'installed.json',installed)
+            install.write_json(install.STATE/'gpu.json',record)
+            with self.subTest(installed=installed,record=record), \
+                 mock.patch.object(install,'require_root'),mock.patch.object(install,'require_debian'), \
+                 mock.patch.object(install.cleanup,'_trusted'),mock.patch.object(install.pwd,'getpwnam',return_value=user), \
+                 mock.patch.object(install,'active',return_value=False),mock.patch.object(install,'status',return_value={'state':'ERROR'}), \
+                 mock.patch.object(install,'prepare_changes',side_effect=RuntimeError('fixture retry reached')):
+                with self.assertRaisesRegex(RuntimeError,'fixture retry reached' if accepted else 'Finish the current installation'):
+                    install.configure_graphics(options(yes=True))
+
+    def test_software_recovery_does_not_require_the_failed_browser_cdp(self):
+        cfg={'user':'agent','home':'/home/agent','render_node':''}
+        broken=mock.Mock(); broken.browser_ready.side_effect=RuntimeError('CDP unavailable')
+        recovered=mock.Mock(); recovered.cdp.return_value={'targetInfos':[{'type':'page','url':'http://fixture.invalid'}]}
+        module=types.SimpleNamespace(Verifier=mock.Mock(side_effect=[broken,recovered]))
+        with mock.patch.dict(sys.modules,{'verify':module}), mock.patch.object(install,'run') as command:
+            result=install.change_graphics_browser(cfg,dict(cfg,gpu_backend='software'),None,recover=True)
+        self.assertIsNone(result['page_urls_preserved'])
+        self.assertEqual(module.HELPERS,install.ROOT)
+        self.assertEqual(install.read_json(install.ETC/'config.json')['gpu_backend'],'software')
+        command.assert_any_call(['systemctl','start','onedebian-agent-chromium.service'])
 
     def tearDown(self):
         for patch in reversed(self.patches):
@@ -402,7 +590,7 @@ class InstallerTests(unittest.TestCase):
     def test_gpu_probe_removes_only_failed_new_grants_and_keeps_successful_or_existing_groups(self):
         account = types.SimpleNamespace(pw_name='agent',pw_dir='/home/agent',pw_uid=1000,pw_gid=1000)
         for granted,passed in [('render',False),(None,False),('render',True)]:
-            config = {'render_node':''}; node = self.base/'renderD130'
+            config = {'render_node':''}; node = Path('/dev/dri/renderD130')
             result = types.SimpleNamespace(returncode=0 if passed else 2,stdout=json.dumps({'gpu':{'passed':passed}}))
             with self.subTest(granted=granted,passed=passed), \
                  mock.patch.object(install.Path,'glob',return_value=[node]), \
