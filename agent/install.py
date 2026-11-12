@@ -25,6 +25,7 @@ ETC = Path('/etc/onedebian-agent')
 STATE = Path('/var/lib/onedebian-agent')
 JOB = 'onedebian-agent-install.service'
 OWNER = 'oneDebian-agent-v1'
+BROWSER_SUDOERS = Path('/etc/sudoers.d/onedebian-agent-browser')
 SOURCE = Path(__file__).resolve().parent
 GPU_PROBE = Path('/run/onedebian-agent-gpu')
 sys.path.insert(0, str(SOURCE))
@@ -36,7 +37,7 @@ FNM = {
     'amd64': ('fnm-linux.zip', '7807664f39d39fc518da1c35ba0181e4b3267603c4b1dedeb4b5fc6ae440a224'),
     'arm64': ('fnm-arm64.zip', '4eaff58b2c5bf30d0934027572dd0b5bbb60d2a1af309230b53662d4b1d45599'),
 }
-PACKAGES = '''ca-certificates curl unzip git openssh-client python3 python3-gi gir1.2-gtk-3.0 libglib2.0-bin
+PACKAGES = '''ca-certificates curl unzip git openssh-client sudo python3 python3-gi gir1.2-gtk-3.0 libglib2.0-bin
 dbus-user-session dbus-x11 libpam-systemd iproute2 procps util-linux xauth x11-utils x11-xserver-utils
 xfce4-session xfce4-panel xfdesktop4 xfwm4 xfce4-settings xfce4-terminal thunar
 chromium chromium-sandbox gnome-keyring libpam-gnome-keyring libsecret-tools tigervnc-standalone-server
@@ -48,8 +49,8 @@ def run(args, **kwargs):
     return subprocess.run([str(a) for a in args], check=True, **kwargs)
 
 
-def capture(args):
-    return run(args, capture_output=True, text=True).stdout.strip()
+def capture(args, **kwargs):
+    return run(args, capture_output=True, text=True, **kwargs).stdout.strip()
 
 
 def read_json(path, default=None):
@@ -442,7 +443,29 @@ def default_browser(user):
     cleanup.set_browser_defaults(sys.modules[__name__], user, updates)
 
 
+def install_browser_start():
+    installer = sys.modules[__name__]
+    if not Path('/usr/bin/sudo').is_file() or not Path('/usr/sbin/visudo').is_file():
+        env = dict(os.environ, DEBIAN_FRONTEND='noninteractive', APT_LISTCHANGES_FRONTEND='none')
+        package_undo.prepare(installer)
+        command = ['apt-get', 'install', '-y', '--no-install-recommends',
+                   '-o', 'Dpkg::Options::=--force-confdef', '-o', 'Dpkg::Options::=--force-confold', 'sudo']
+        try:
+            run(package_undo.install_args(installer, command), env=env)
+        finally:
+            package_undo.finish(installer)
+    content = 'agent ALL=(root) NOPASSWD: NOSETENV: /usr/bin/python3 -I /opt/onedebian-agent/start-browser.py\n'
+    candidate = STATE / ('sudoers-browser-' + secrets.token_hex(6))
+    try:
+        atomic(candidate, content, 0o600)
+        run(['/usr/sbin/visudo', '-cf', candidate])
+        owned_file(BROWSER_SUDOERS, content, 0o440)
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
 def desktop_launchers(user):
+    install_browser_start()
     desktop_dir = Path(user.pw_dir) / 'Desktop'
     autostart = Path(user.pw_dir) / '.config/autostart'
     for src in (ROOT / 'desktop').glob('*.desktop'):
@@ -964,6 +987,12 @@ def wait_install():
 
 
 def uninstall(options):
+    require_root()
+    with operation_lock():
+        return _uninstall(options)
+
+
+def _uninstall(options):
     require_root()
     if not options.yes: raise RuntimeError('Use --yes to remove owned services; browser data/workspaces/credentials remain.')
     if active(): raise RuntimeError('Installation is active; wait for it to finish before uninstalling')

@@ -79,6 +79,7 @@ class BrowserDefaultTests(unittest.TestCase):
             with mock.patch.object(install, 'ROOT', source), \
                  mock.patch.object(install, 'user_files', side_effect=lambda _: contextlib.nullcontext()), \
                  mock.patch.object(install, 'owned_file'), \
+                 mock.patch.object(install, 'install_browser_start'), \
                  mock.patch.object(install, 'default_browser') as preferred:
                 install.desktop_launchers(user)
             preferred.assert_called_once_with(user)
@@ -105,6 +106,16 @@ class BrowserDefaultTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Default browser preferences changed'):
                     install.uninstall(types.SimpleNamespace(yes=True))
             command.assert_not_called()
+
+    def test_uninstall_does_not_race_another_browser_operation(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(install, 'STATE', Path(directory)), \
+             mock.patch.object(install, 'require_root'), \
+             mock.patch.object(install, '_uninstall') as remove:
+            with install.operation_lock():
+                with self.assertRaisesRegex(RuntimeError, 'Another Agent'):
+                    install.uninstall(types.SimpleNamespace(yes=True))
+            remove.assert_not_called()
 
 
 if __name__ == '__main__':
