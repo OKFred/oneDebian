@@ -58,7 +58,7 @@ wsl.exe --distribution ai-dev --user agent --exec /home/agent/.local/bin/codex
 
 使用 `-NoWait` 时只提交后台安装；通过状态入口查看，完成后再次选择 **09 → 2 安装／检查补齐**，自动检查 SSH 和查看入口。已有配置的自定义 SSH 端口会沿用；只有明确调整端口时才在 **09 → 14 SSH** 使用 `-SshPort 2223` 等参数。回环 SSH 不直接向局域网开放。原生 Debian 可通过 **14 → 10** 提供公钥后配置，或继续使用原有 SSH 服务。
 
-别名的 `ProxyCommand` 通过 `wsl.exe --distribution <实例名> --user agent --exec /usr/bin/nc 127.0.0.1 2222` 进入指定实例，使用实例名而非 WSL 的 NAT IP。它不创建 Windows 22 端口的监听，也不修改全局 WSL 网络，因此 `ssh 127.0.0.1` 不是这个入口。端口被占用时会拒绝，保留原服务。
+别名的 `ProxyCommand` 通过 `wsl.exe --distribution <实例名> --user agent --exec /usr/bin/nc 127.0.0.1 2222` 进入指定实例，使用实例名而非 WSL 的 NAT IP。它不创建 Windows 22 端口的监听，也不修改全局 WSL 网络，因此 `ssh 127.0.0.1` 不是这个入口。其他服务正在监听该端口时会拒绝，保留原服务；旧 SSH 服务移除后仍存活的已建立会话不会被终止，也不妨碍重新安装。
 
 Windows 专用私钥保存在 `~/.ssh/onedebian_agent_ed25519`，只将公钥传入客机。每个实例的 SSH 配置和可信 host key 存于 `~/.ssh/onedebian-agent/`；主配置只增加一条位于文件开头的 Include，原有条目保留。连接强制公钥、严格 host key 检查；创建时会执行一次无密码登录验证。WSL 重建时，以选中实例中可信读取到的新 host key 更新自有记录，不关闭身份校验。遇已有同名别名、未知密钥或修改过的自有记录会拒绝覆盖。
 

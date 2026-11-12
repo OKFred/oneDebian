@@ -201,6 +201,8 @@ def user_ctl(user, *args, **kwargs):
 
 def port_free(port):
     with socket.socket() as s:
+        # Match server binding: retained SSH sessions must not block a new listener.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(('127.0.0.1', port))
             return True
