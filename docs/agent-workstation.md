@@ -12,6 +12,7 @@
 .\agent-via-wsl.ps1 -Action Create
 .\agent-via-wsl.ps1 -Action Status -DistroName ai-dev
 .\agent-via-wsl.ps1 -Action Open -DistroName ai-dev
+.\agent-via-wsl.ps1 -Action RelayStatus -DistroName ai-dev
 ```
 
 新实例的 rootfs 来自 Linux Containers 镜像服务，经上游 SHA256 校验后导入。它启用 systemd、默认登录 `agent`，关闭 Windows 磁盘自动挂载和程序互操作。只重启新实例，不改变 Windows 默认 WSL 或其他实例。默认启用现有的无窗口后台驻留；登录 Windows 自动启动默认关闭，需要时在原 **07 状态** 菜单开启。
@@ -67,7 +68,11 @@ Git 与 OpenSSH 客户端一并安装。SSH 非交互命令和自己创建的服
 
 Windows 通过 **09 → 打开桌面** 或 `-Action Open` 自动携带本地令牌。初始只读；需要手动操作时先停止 Codex 当前任务，再切换 noVNC 输入模式，点击桌面“接管浏览器”。完成后点击“交还 Codex”，切回只读并要求 Codex重新读取标签页继续。
 
-如果全局 `.wslconfig` 已设置 `localhostForwarding=false`，创建前会高亮提醒，Windows 不能直接打开上述 WSL 回环入口。工具不修改该全局设置、不自动执行影响其他实例的重启；须另行安排转发或调整网络设置。Linux 侧的桌面和 MCP 仍可正常运行。
+如果全局 `.wslconfig` 已设置 `localhostForwarding=false`，工作机就绪后会自动启动当前用户的专用回环转发，无须修改该设置或重启其他 WSL。`Open` 也会先验证入口身份，再按需启动转发；已有可验证的 WSL 原生转发可继续使用。未确认身份的占用端口会报错，不会停止其他程序，也不会把桌面令牌发给它。
+
+**09 → 8／9／10** 分别启动、停止、查看专用转发，也可使用 `-Action RelayStart|RelayStop|RelayStatus`。转发只在 Windows 当前用户会话中运行；只绑定 `127.0.0.1` 的 noVNC／MCP 同号端口，经 `wsl.exe` 把字节送入明确选定的发行版，不转发 CDP，不在 Windows 部署 MCP。端口仍以工作机 `status` 为准。
+
+转发器通过本机 .NET Framework 编译，无须管理员或 Windows Python。旧版工作机需要先单独升级受管组件；对已 READY 的环境执行 `Install`／`Resume` 不会自动升级这些组件。新建工作机已包含所需组件。转发器代码升级时如检测到旧版转发仍运行，请先 `RelayStop` 再 `RelayStart`。停止转发只断开查看／MCP 连接，保留 Debian、浏览器页面和构建任务；人工接管时 MCP 暂停不妨碍桌面查看。卸载工作机前会先停止它自己的本机转发。
 
 接管会停止 MCP，保留浏览器、页面及独立构建任务；人工标记跨重启保留。断开 MCP、查看页或 SSH 隧道不退出桌面。令牌文件权限为 0600，状态与日志不输出令牌。查看入口校验 Host/Origin 并禁止 iframe 嵌入。
 
